@@ -573,8 +573,11 @@ export default function Home() {
 
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
   return (
-    <main style={{ display: "flex", height: "100vh", background: "#F7F8FA", flexDirection: "column" }}>
-      <div style={{ ...sidebarStyle, display: isMobile ? "none" : "flex" }}>
+    <main style={{ display: "flex", height: "100vh", background: "#F7F8FA" }}>
+      <div style={{
+        ...sidebarStyle,
+        display: "none",
+      }} className="hidden md:flex">
         <h1 style={{ fontSize: "18px", fontWeight: "bold", marginBottom: "18px" }}>
           System Maker
         </h1>
@@ -610,7 +613,7 @@ export default function Home() {
         </div>
       </div>
 
-      <div style={{ flex: 1, padding: "24px", overflow: "auto" }}>
+      <div style={{ flex: 1, padding: "16px", overflow: "auto", paddingBottom: "80px" }}>
         {activePage === "calendar" ? (
           <CalendarPage
             events={calendarEvents}
