@@ -640,7 +640,7 @@ export default function Home() {
               }}
             >
               <div>
-                <h2 style={{ fontSize: "36px", fontWeight: "bold", marginBottom: "8px" }}>
+                <h2 style={{ fontSize: "clamp(20px, 5vw, 36px)", fontWeight: "bold", marginBottom: "8px", whiteSpace: "nowrap" }}>
                   플래너
                 </h2>
 
@@ -1596,7 +1596,7 @@ function ProjectPage({
     <div>
       <div style={pageHeaderStyle}>
         <div>
-          <h2 style={{ fontSize: "36px", fontWeight: "bold", marginBottom: "8px" }}>
+          <h2 style={{ fontSize: "clamp(20px, 5vw, 36px)", fontWeight: "bold", marginBottom: "8px", whiteSpace: "nowrap" }}>
             프로젝트 센터
           </h2>
 
@@ -2263,7 +2263,7 @@ function RecordPage({
     <div>
       <div style={pageHeaderStyle}>
         <div>
-          <h2 style={{ fontSize: "36px", fontWeight: "bold", marginBottom: "8px" }}>
+          <h2 style={{ fontSize: "clamp(20px, 5vw, 36px)", fontWeight: "bold", marginBottom: "8px", whiteSpace: "nowrap" }}>
             기록 센터
           </h2>
 
@@ -3100,9 +3100,9 @@ function CalendarPage({
     <div>
       <div style={pageHeaderStyle}>
         <div>
-          <h2 style={{ fontSize: "36px", fontWeight: "bold", marginBottom: "8px" }}>
-            캘린더
-          </h2>
+          <h2 style={{ fontSize: "clamp(20px, 5vw, 36px)", fontWeight: "bold", marginBottom: "8px", whiteSpace: "nowrap" }}>
+              캘린더
+            </h2>
 
             <p style={{ color: "#8A8178", margin: 0 }}>
             구글 캘린더 일정이 시간대에 맞춰 표시됩니다.
@@ -3114,7 +3114,7 @@ function CalendarPage({
           )}
         </div>
 
-        <div style={{ display: "flex", gap: "8px" }}>
+        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" as const }}>
           <button
             onClick={() => loadGoogleCalendar()}
             disabled={isCalendarLoading}
@@ -3671,8 +3671,10 @@ function ProgressBarInput({ value, onChange }: { value: number; onChange: (value
 const pageHeaderStyle = {
   display: "flex",
   justifyContent: "space-between",
-  alignItems: "center",
-  marginBottom: "28px",
+  alignItems: "flex-start",
+  marginBottom: "20px",
+  flexWrap: "wrap" as const,
+  gap: "12px",
 };
 
 const sidebarStyle = {
@@ -4366,15 +4368,16 @@ const recordMemoListPanelStyle = {
 
 const recordMemoListHeaderStyle = {
   display: "flex",
-  alignItems: "center",
+  alignItems: "flex-start",
   justifyContent: "space-between",
-  gap: "18px",
+  gap: "12px",
   marginBottom: "16px",
+  flexWrap: "wrap" as const,
 };
 
 const recordMemoSearchInputStyle = {
   ...inputStyle,
-  width: "320px",
+  width: "min(320px, 100%)",
   height: "42px",
   borderRadius: "14px",
   fontSize: "14px",
@@ -4580,12 +4583,12 @@ const modalBackdropStyle = {
 };
 
 const modalBoxStyle = {
-  width: "860px",
+  width: "min(860px, calc(100vw - 32px))",
   maxHeight: "90vh",
   overflowY: "auto" as const,
   background: "#FFFCF8",
   borderRadius: "28px",
-  padding: "36px",
+  padding: "clamp(20px, 4vw, 36px)",
 };
 
 const projectDetailModalStyle = {
