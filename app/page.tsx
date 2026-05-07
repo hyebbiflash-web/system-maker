@@ -186,7 +186,10 @@ export default function Home() {
 const [authLoading, setAuthLoading] = useState(true);
 
 useEffect(() => {
-  const { onAuthStateChanged } = require("firebase/auth");
+  // redirect 후 돌아왔을 때 처리
+  const { getRedirectResult } = require("firebase/auth");
+  getRedirectResult(auth).catch(() => {});
+
   const unsub = onAuthStateChanged(auth, (u: import("firebase/auth").User | null) => {
     setUser(u);
     setAuthLoading(false);

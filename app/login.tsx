@@ -1,13 +1,21 @@
 "use client";
 
-import { signInWithPopup } from "firebase/auth";
+import { signInWithRedirect, signInWithPopup } from "firebase/auth";
 import { auth, googleProvider } from "./firebase";
 
 export default function LoginPage({ onLogin }: { onLogin: () => void }) {
   const handleLogin = async () => {
     try {
-      await signInWithPopup(auth, googleProvider);
-      onLogin();
+      // 사파리/모바일은 redirect, 그 외는 popup
+      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+      if (isSafari || isMobile) {
+        await signInWithRedirect(auth, googleProvider);
+      } else {
+        await signInWithPopup(auth, googleProvider);
+        onLogin();
+      }
     } catch (e) {
       console.error(e);
     }
