@@ -187,20 +187,25 @@ export default function Home() {
 const [authLoading, setAuthLoading] = useState(true);
 
 useEffect(() => {
+  // onAuthStateChanged 먼저 등록 — redirect 결과도 여기서 잡힘
+  const unsub = onAuthStateChanged(auth, (u) => {
+    setUser(u);
+    setAuthLoading(false);
+  });
+
+  // redirect 후 돌아왔을 때 추가 처리
   getRedirectResult(auth)
     .then((result) => {
       if (result?.user) {
         setUser(result.user);
+        setAuthLoading(false);
       }
     })
-    .catch(() => {})
-    .finally(() => {
-      const unsub = onAuthStateChanged(auth, (u) => {
-        setUser(u);
-        setAuthLoading(false);
-      });
-      return unsub;
+    .catch(() => {
+      setAuthLoading(false);
     });
+
+  return () => unsub();
 }, []);
   const [activePage, setActivePage] = useState<"calendar" | "planner" | "project" | "record" | "trash">("calendar");
 
