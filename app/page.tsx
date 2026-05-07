@@ -1139,6 +1139,7 @@ if (!user) {
           { id: "planner", label: "플래너", icon: "📋" },
           { id: "project", label: "프로젝트", icon: "🗂️" },
           { id: "record", label: "기록", icon: "📝" },
+          { id: "trash", label: "휴지통", icon: "🗑️" },
         ].map((tab) => (
           <button
             key={tab.id}
