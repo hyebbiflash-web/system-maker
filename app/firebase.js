@@ -1,0 +1,22 @@
+import { initializeApp } from "firebase/app";
+import { getAuth, GoogleAuthProvider } from "firebase/auth";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCt8YU58aCrIxGwLG8DFw6KIkZkO_W86EA",
+  authDomain: "system-maker-e5295.firebaseapp.com",
+  projectId: "system-maker-e5295",
+  storageBucket: "system-maker-e5295.firebasestorage.app",
+  messagingSenderId: "1033724339791",
+  appId: "1:1033724339791:web:8f11ab122a530c76dd6c3a"
+};
+
+
+export const app = initializeApp(firebaseConfig);
+
+export const auth = getAuth(app);
+
+export const calendarProvider = new GoogleAuthProvider();
+calendarProvider.addScope("https://www.googleapis.com/auth/calendar.events");
+calendarProvider.setCustomParameters({
+  prompt: "consent",
+});
