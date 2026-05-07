@@ -1,9 +1,13 @@
 "use client";
 
+import LoginPage from "./login";
 import { useEffect, useState, type Dispatch, type KeyboardEvent, type SetStateAction } from "react";
 import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { Settings } from "lucide-react";
 import { auth, calendarProvider } from "./firebase";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { doc, setDoc, onSnapshot } from "firebase/firestore";
+import { db } from "./firebase";
 
 type Area = "일" | "관리" | "일상";
 
@@ -178,6 +182,17 @@ const formatTwentyFourHour = (date: Date) =>
   });
 
 export default function Home() {
+  const [user, setUser] = useState<import("firebase/auth").User | null>(null);
+const [authLoading, setAuthLoading] = useState(true);
+
+useEffect(() => {
+  const { onAuthStateChanged } = require("firebase/auth");
+  const unsub = onAuthStateChanged(auth, (u: import("firebase/auth").User | null) => {
+    setUser(u);
+    setAuthLoading(false);
+  });
+  return () => unsub();
+}, []);
   const [activePage, setActivePage] = useState<"calendar" | "planner" | "project" | "record" | "trash">("calendar");
 
   const [isTodoModalOpen, setIsTodoModalOpen] = useState(false);
@@ -570,6 +585,17 @@ export default function Home() {
     if (dateGap !== 0) return dateGap;
     return a.id - b.id;
   });
+  if (authLoading) {
+  return (
+    <div className="min-h-screen bg-[#F7F8FA] flex items-center justify-center">
+      <div className="text-[#8A8178] text-lg">로딩 중...</div>
+    </div>
+  );
+}
+
+if (!user) {
+  return <LoginPage onLogin={() => {}} />;
+}
 
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
   return (
