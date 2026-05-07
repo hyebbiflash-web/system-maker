@@ -1,6 +1,7 @@
 "use client";
 
 import LoginPage from "./login";
+import { getRedirectResult } from "firebase/auth";
 import { useEffect, useState, type Dispatch, type KeyboardEvent, type SetStateAction } from "react";
 import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { Settings } from "lucide-react";
@@ -186,15 +187,20 @@ export default function Home() {
 const [authLoading, setAuthLoading] = useState(true);
 
 useEffect(() => {
-  // redirect 후 돌아왔을 때 처리
-  const { getRedirectResult } = require("firebase/auth");
-  getRedirectResult(auth).catch(() => {});
-
-  const unsub = onAuthStateChanged(auth, (u: import("firebase/auth").User | null) => {
-    setUser(u);
-    setAuthLoading(false);
-  });
-  return () => unsub();
+  getRedirectResult(auth)
+    .then((result) => {
+      if (result?.user) {
+        setUser(result.user);
+      }
+    })
+    .catch(() => {})
+    .finally(() => {
+      const unsub = onAuthStateChanged(auth, (u) => {
+        setUser(u);
+        setAuthLoading(false);
+      });
+      return unsub;
+    });
 }, []);
   const [activePage, setActivePage] = useState<"calendar" | "planner" | "project" | "record" | "trash">("calendar");
 
