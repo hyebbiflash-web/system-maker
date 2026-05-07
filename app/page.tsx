@@ -2871,6 +2871,8 @@ function CalendarPage({
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [eventTitle, setEventTitle] = useState("");
+  const [draggedEventId, setDraggedEventId] = useState<string | null>(null);
+  const [dragOverDate, setDragOverDate] = useState<string | null>(null);  
   const [eventStart, setEventStart] = useState("");
   const [eventEnd, setEventEnd] = useState("");
 
@@ -2888,7 +2890,55 @@ function CalendarPage({
     date.setDate(startOfWeek.getDate() + i);
     return date;
   });
+  const handleEventDragStart = (eventId: string) => {
+  setDraggedEventId(eventId);
+};
 
+const handleEventDrop = async (targetDate: Date) => {
+  if (!draggedEventId) return;
+  const draggedEvent = events.find((e) => e.id === draggedEventId);
+  if (!draggedEvent || !draggedEvent.start?.dateTime || !draggedEvent.end?.dateTime) {
+    setDraggedEventId(null);
+    return;
+  }
+
+  const oldStart = new Date(draggedEvent.start.dateTime);
+  const oldEnd = new Date(draggedEvent.end.dateTime);
+  const duration = oldEnd.getTime() - oldStart.getTime();
+
+  const newStart = new Date(targetDate);
+  newStart.setHours(oldStart.getHours(), oldStart.getMinutes(), 0, 0);
+  const newEnd = new Date(newStart.getTime() + duration);
+
+  const updatedEvent = {
+    ...draggedEvent,
+    start: { dateTime: newStart.toISOString() },
+    end: { dateTime: newEnd.toISOString() },
+  };
+
+  setEvents(events.map((e) => e.id === draggedEventId ? updatedEvent : e));
+
+  // 구글 캘린더에도 반영
+  if (accessToken && !draggedEventId.startsWith("planner-")) {
+    await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/primary/events/${draggedEventId}`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          start: { dateTime: newStart.toISOString(), timeZone: "Asia/Seoul" },
+          end: { dateTime: newEnd.toISOString(), timeZone: "Asia/Seoul" },
+        }),
+      }
+    );
+  }
+
+  setDraggedEventId(null);
+  setDragOverDate(null);
+};
   const getErrorMessage = (error: unknown) => {
     if (error instanceof Error) return error.message;
     return "알 수 없는 오류가 발생했어요.";
@@ -3246,13 +3296,22 @@ function CalendarPage({
 
                 return (
                   <div
-                    key={date.toDateString()}
-                    style={{
-                      ...calendarDayColumnStyle,
-                      height: (endHour - startHour + 1) * hourHeight,
-                      background: isToday ? "#F8FBFF" : "white",
-                    }}
-                  >
+                      key={date.toDateString()}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setDragOverDate(date.toDateString());
+                      }}
+                      onDragLeave={() => setDragOverDate(null)}
+                      onDrop={() => handleEventDrop(date)}
+                      style={{
+                        ...calendarDayColumnStyle,
+                        height: (endHour - startHour + 1) * hourHeight,
+                        background: dragOverDate === date.toDateString()
+                          ? "#EEF5FF"
+                          : isToday ? "#F8FBFF" : "white",
+                        transition: "background 0.15s",
+                      }}
+                    >
                     {Array.from({ length: endHour - startHour + 1 }, (_, i) => (
                       <div
                         key={i}
@@ -3269,15 +3328,23 @@ function CalendarPage({
                       const position = getEventPosition(event);
 
                       return (
-                        <button
-                          key={event.id}
-                          onClick={() => openEditEventModal(event)}
-                          style={{
-                            ...calendarEventButtonStyle,
-                            top: position.top,
-                            height: position.height,
-                          }}
-                        >
+                       <button
+                            key={event.id}
+                            draggable
+                            onDragStart={() => handleEventDragStart(event.id)}
+                            onDragEnd={() => {
+                              setDraggedEventId(null);
+                              setDragOverDate(null);
+                            }}
+                            onClick={() => openEditEventModal(event)}
+                            style={{
+                              ...calendarEventButtonStyle,
+                              top: position.top,
+                              height: position.height,
+                              opacity: draggedEventId === event.id ? 0.5 : 1,
+                              cursor: "grab",
+                            }}
+                          >
                           <span>{event.summary || "제목 없음"}</span>
                           <span style={calendarEventTimeStyle}>
                             {new Date(event.start.dateTime).toLocaleTimeString("ko-KR", {
