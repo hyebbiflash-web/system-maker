@@ -571,9 +571,10 @@ export default function Home() {
     return a.id - b.id;
   });
 
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
   return (
-    <main style={{ display: "flex", height: "100vh", background: "#F7F8FA" }}>
-      <div style={sidebarStyle}>
+    <main style={{ display: "flex", height: "100vh", background: "#F7F8FA", flexDirection: "column" }}>
+      <div style={{ ...sidebarStyle, display: isMobile ? "none" : "flex" }}>
         <h1 style={{ fontSize: "18px", fontWeight: "bold", marginBottom: "18px" }}>
           System Maker
         </h1>
@@ -1075,6 +1076,49 @@ export default function Home() {
           </div>
         </div>
       )}
+      <nav style={{
+        display: "flex",
+        position: "fixed" as const,
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: "64px",
+        background: "#FFFCF8",
+        borderTop: "1px solid #E8E1D8",
+        justifyContent: "space-around",
+        alignItems: "center",
+        zIndex: 50,
+      }}
+        className="flex md:hidden"
+      >
+        {[
+          { id: "calendar", label: "캘린더", icon: "📅" },
+          { id: "planner", label: "플래너", icon: "📋" },
+          { id: "project", label: "프로젝트", icon: "🗂️" },
+          { id: "record", label: "기록", icon: "📝" },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActivePage(tab.id as typeof activePage)}
+            style={{
+              display: "flex",
+              flexDirection: "column" as const,
+              alignItems: "center",
+              gap: "2px",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: "8px 16px",
+              color: activePage === tab.id ? "#B40023" : "#8A8178",
+              fontWeight: activePage === tab.id ? "800" : "400",
+              fontSize: "11px",
+            }}
+          >
+            <span style={{ fontSize: "22px" }}>{tab.icon}</span>
+            {tab.label}
+          </button>
+        ))}
+      </nav>
     </main>
   );
 }
@@ -3633,6 +3677,8 @@ const sidebarStyle = {
   background: "#FFFCF8",
   borderRight: "1px solid #e5e8eb",
   padding: "14px 10px",
+  display: "flex" as const,
+  flexDirection: "column" as const,
 };
 
 const plannerOuterStyle = {
