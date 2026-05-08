@@ -2873,6 +2873,10 @@ function CalendarPage({
   const [eventTitle, setEventTitle] = useState("");
   const [draggedEventId, setDraggedEventId] = useState<string | null>(null);
   const [dragOverDate, setDragOverDate] = useState<string | null>(null);  
+  const [isCreatingEvent, setIsCreatingEvent] = useState(false);
+  const [createStartY, setCreateStartY] = useState(0);
+  const [createDate, setCreateDate] = useState<Date | null>(null);
+  const [createPreview, setCreatePreview] = useState<{top: number, height: number} | null>(null);
   const [eventStart, setEventStart] = useState("");
   const [eventEnd, setEventEnd] = useState("");
 
@@ -2890,6 +2894,14 @@ function CalendarPage({
     date.setDate(startOfWeek.getDate() + i);
     return date;
   });
+  const getTimeFromY = (y: number, containerTop: number) => {
+  const relativeY = y - containerTop;
+  const totalMinutes = (relativeY / hourHeight) * 60 + startHour * 60;
+  const snappedMinutes = Math.round(totalMinutes / 15) * 15;
+  const hours = Math.floor(snappedMinutes / 60);
+  const minutes = snappedMinutes % 60;
+  return { hours: Math.max(startHour, Math.min(endHour - 1, hours)), minutes };
+};
   const handleEventDragStart = (eventId: string) => {
   setDraggedEventId(eventId);
 };
@@ -3296,22 +3308,71 @@ const handleEventDrop = async (targetDate: Date) => {
 
                 return (
                   <div
-                      key={date.toDateString()}
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        setDragOverDate(date.toDateString());
-                      }}
-                      onDragLeave={() => setDragOverDate(null)}
-                      onDrop={() => handleEventDrop(date)}
-                      style={{
-                        ...calendarDayColumnStyle,
-                        height: (endHour - startHour + 1) * hourHeight,
-                        background: dragOverDate === date.toDateString()
-                          ? "#EEF5FF"
-                          : isToday ? "#F8FBFF" : "white",
-                        transition: "background 0.15s",
-                      }}
-                    >
+                    key={date.toDateString()}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragOverDate(date.toDateString());
+                    }}
+                    onDragLeave={() => setDragOverDate(null)}
+                    onDrop={() => handleEventDrop(date)}
+                    onMouseDown={(e) => {
+                      if ((e.target as HTMLElement).closest("button")) return;
+                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                      const { hours, minutes } = getTimeFromY(e.clientY, rect.top);
+                      const start = new Date(date);
+                      start.setHours(hours, minutes, 0, 0);
+                      setCreateDate(start);
+                      setCreateStartY(e.clientY);
+                      setIsCreatingEvent(true);
+                      setCreatePreview({
+                        top: (hours - startHour) * hourHeight + (minutes / 60) * hourHeight,
+                        height: hourHeight,
+                      });
+                    }}
+                    onMouseMove={(e) => {
+                      if (!isCreatingEvent || !createDate) return;
+                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                      const { hours, minutes } = getTimeFromY(e.clientY, rect.top);
+                      const endTime = new Date(date);
+                      endTime.setHours(hours, minutes, 0, 0);
+                      const startTop = (createDate.getHours() - startHour) * hourHeight + (createDate.getMinutes() / 60) * hourHeight;
+                      const endTop = (hours - startHour) * hourHeight + (minutes / 60) * hourHeight;
+                      if (endTop > startTop) {
+                        setCreatePreview({ top: startTop, height: Math.max(hourHeight / 2, endTop - startTop) });
+                      }
+                    }}
+                    onMouseUp={(e) => {
+                      if (!isCreatingEvent || !createDate) {
+                        setIsCreatingEvent(false);
+                        return;
+                      }
+                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                      const { hours, minutes } = getTimeFromY(e.clientY, rect.top);
+                      const end = new Date(date);
+                      end.setHours(hours, minutes, 0, 0);
+                      if (end <= createDate) {
+                        end.setTime(createDate.getTime() + 60 * 60 * 1000);
+                      }
+                      setEditingEventId(null);
+                      setEventTitle("");
+                      setEventStart(formatDateTimeLocalValue(createDate));
+                      setEventEnd(formatDateTimeLocalValue(end));
+                      setIsEventModalOpen(true);
+                      setIsCreatingEvent(false);
+                      setCreatePreview(null);
+                      setCreateDate(null);
+                    }}
+                    style={{
+                      ...calendarDayColumnStyle,
+                      height: (endHour - startHour + 1) * hourHeight,
+                      background: dragOverDate === date.toDateString()
+                        ? "#EEF5FF"
+                        : isToday ? "#F8FBFF" : "white",
+                      transition: "background 0.15s",
+                      userSelect: "none",
+                      cursor: isCreatingEvent ? "ns-resize" : "default",
+                    }}
+                  >
                     {Array.from({ length: endHour - startHour + 1 }, (_, i) => (
                       <div
                         key={i}
@@ -3321,7 +3382,26 @@ const handleEventDrop = async (targetDate: Date) => {
                         }}
                       />
                     ))}
-
+                    {isCreatingEvent && createPreview && createDate?.toDateString() === date.toDateString() && (
+                    <div style={{
+                      position: "absolute",
+                      left: "4px",
+                      right: "4px",
+                      top: createPreview.top,
+                      height: createPreview.height,
+                      background: "#C9DEF9",
+                      borderRadius: "6px",
+                      border: "2px solid #1A73E8",
+                      padding: "4px 8px",
+                      fontSize: "12px",
+                      color: "#1A73E8",
+                      fontWeight: "600",
+                      pointerEvents: "none",
+                      zIndex: 5,
+                    }}>
+                      {createDate.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false })}
+                    </div>
+                  )}
                     {dayEvents.map((event) => {
                       if (!event.start?.dateTime) return null;
 
@@ -3364,51 +3444,40 @@ const handleEventDrop = async (targetDate: Date) => {
       </div>
 
       {isEventModalOpen && (
-        <div style={modalBackdropStyle}>
-          <div style={{ ...modalBoxStyle, width: "520px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <h2 style={{ fontSize: "32px", fontWeight: "bold", margin: 0 }}>
-                {editingEventId ? "일정 수정" : "일정 추가"}
+        <div style={modalBackdropStyle} onClick={(e) => { if (e.target === e.currentTarget) setIsEventModalOpen(false); }}>
+          <div style={{ background: "white", borderRadius: "12px", boxShadow: "0 8px 32px rgba(0,0,0,0.2)", width: "min(480px, calc(100vw - 32px))", maxHeight: "90vh", overflowY: "auto", padding: "24px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+              <h2 style={{ fontSize: "20px", fontWeight: "600", margin: 0, color: "#202124" }}>
+                {editingEventId ? "일정 수정" : "새 일정"}
               </h2>
-
-              <button onClick={() => setIsEventModalOpen(false)} style={closeButtonStyle}>
-                ×
-              </button>
+              <button onClick={() => setIsEventModalOpen(false)} style={{ width: "32px", height: "32px", borderRadius: "50%", border: "none", background: "transparent", fontSize: "20px", cursor: "pointer" }}>×</button>
             </div>
-
-            <FormLabel title="일정 제목" />
-            <input
-              value={eventTitle}
-              onChange={(e) => setEventTitle(e.target.value)}
-              style={inputStyle}
-              placeholder="예: 미팅"
-            />
-
-            <FormLabel title="시작 시간" />
-            <input
-              type="datetime-local"
-              value={eventStart}
-              onChange={(e) => setEventStart(e.target.value)}
-              style={inputStyle}
-            />
-
-            <FormLabel title="종료 시간" />
-            <input
-              type="datetime-local"
-              value={eventEnd}
-              onChange={(e) => setEventEnd(e.target.value)}
-              style={inputStyle}
-            />
-
-            <button style={redButtonFull} onClick={saveGoogleEvent}>
-              {editingEventId ? "수정하기" : "추가하기"}
-            </button>
-
-            {editingEventId && (
-              <button style={deleteFullButtonStyle} onClick={deleteGoogleEvent}>
-                삭제하기
-              </button>
-            )}
+            <input value={eventTitle} onChange={(e) => setEventTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") saveGoogleEvent(); }} autoFocus placeholder="제목 추가" style={{ width: "100%", border: "none", borderBottom: "2px solid #1A73E8", fontSize: "22px", padding: "8px 0", marginBottom: "24px", outline: "none", boxSizing: "border-box", color: "#202124" }} />
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px", marginBottom: "24px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+                <span style={{ fontSize: "20px" }}>🕐</span>
+                <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                  <input type="datetime-local" value={eventStart} onChange={(e) => setEventStart(e.target.value)} style={{ border: "1px solid #E8EAED", borderRadius: "8px", padding: "8px 12px", fontSize: "14px", color: "#202124", outline: "none" }} />
+                  <span style={{ color: "#5F6368" }}>→</span>
+                  <input type="datetime-local" value={eventEnd} onChange={(e) => setEventEnd(e.target.value)} style={{ border: "1px solid #E8EAED", borderRadius: "8px", padding: "8px 12px", fontSize: "14px", color: "#202124", outline: "none" }} />
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+                <span style={{ fontSize: "20px" }}>📍</span>
+                <input placeholder="장소 추가" style={{ flex: 1, border: "none", borderBottom: "1px solid #E8EAED", padding: "8px 0", fontSize: "14px", outline: "none", color: "#202124" }} />
+              </div>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: "16px" }}>
+                <span style={{ fontSize: "20px", marginTop: "4px" }}>📝</span>
+                <textarea placeholder="메모 추가" style={{ flex: 1, border: "none", borderBottom: "1px solid #E8EAED", padding: "8px 0", fontSize: "14px", outline: "none", resize: "none", minHeight: "60px", color: "#202124", fontFamily: "inherit" }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>{editingEventId && <button onClick={deleteGoogleEvent} style={{ border: "none", background: "transparent", color: "#B40023", fontSize: "14px", cursor: "pointer", padding: "8px 12px", borderRadius: "6px" }}>삭제</button>}</div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button onClick={() => setIsEventModalOpen(false)} style={{ border: "1px solid #E8EAED", background: "white", color: "#5F6368", fontSize: "14px", cursor: "pointer", padding: "8px 20px", borderRadius: "6px" }}>취소</button>
+                <button onClick={saveGoogleEvent} style={{ border: "none", background: "#1A73E8", color: "white", fontSize: "14px", fontWeight: "600", cursor: "pointer", padding: "8px 20px", borderRadius: "6px" }}>{editingEventId ? "저장" : "추가"}</button>
+              </div>
+            </div>
           </div>
         </div>
       )}
