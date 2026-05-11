@@ -58,12 +58,14 @@ type ProjectParticipant = {
 type ProjectTodo = {
   id: number;
   title: string;
+  dueDate?: string;
   done: boolean;
   children: ProjectTodo[];
 };
 
 type ProjectTodoSeed = string | {
   title: string;
+  dueDate?: string;
   children?: ProjectTodoSeed[];
 };
 
@@ -886,7 +888,7 @@ if (!user) {
           />
 
           <MenuItem
-            title="프로젝트 센테"
+            title="프로젝트 센터"
             active={activePage === "project"}
             onClick={() => setActivePage("project")}
           />
@@ -937,12 +939,12 @@ if (!user) {
                   플래너
                 </h2>
 
-                <p style={{ color: "#8A8178", margin: 0 }}>주간 플래너</p>
+                <p style={{ color: "#8A8178", margin: 0 }}>주 단위로 일정을 관리합니다.</p>
               </div>
 
               <div style={{ display: "flex", gap: "8px" }}>
                 <button onClick={() => setIsTodoListOpen(true)} style={todayButtonStyle}>
-                  할일 모음
+                  ✓ 할일모음
                 </button>
                 <button onClick={() => openScheduleModal(new Date().toDateString())} style={todayButtonStyle}>
                   + 일정 추가
@@ -1502,11 +1504,13 @@ function ProjectPage({
   const makeProjectTodos = (items: ProjectTodoSeed[]): ProjectTodo[] =>
     items.map((item, index) => {
       const title = typeof item === "string" ? item : item.title;
+      const dueDate = typeof item === "string" ? "" : item.dueDate || "";
       const children = typeof item === "string" ? [] : item.children || [];
 
       return {
         id: createProjectTodoId() + index,
         title,
+        dueDate,
         done: false,
         children: makeProjectTodos(children),
       };
@@ -1526,7 +1530,9 @@ function ProjectPage({
       status: "진행중",
       memo: "플래너, 캘린더, 프로젝트 센터를 하나의 흐름으로 연결하기",
       ownerEmail: currentOwner,
-      participants: [],
+      participants: [
+        { email: "demo.partner@example.com", status: "pending", canEdit: true, canDelete: false },
+      ],
       todos: makeProjectTodos([
         { title: "캘린더 UI 정리", children: ["구글 캘린더 연결 확인", "일정 추가 팝업 점검"] },
         "프로젝트 센터 구조 만들기",
@@ -1584,9 +1590,13 @@ function ProjectPage({
   const [projectDraftParticipants, setProjectDraftParticipants] = useState<ProjectParticipant[]>([]);
   const [projectDraftTodos, setProjectDraftTodos] = useState<ProjectTodo[]>([]);
   const [newTodoTitles, setNewTodoTitles] = useState<Record<number, string>>({});
+  const [newTodoDueDates, setNewTodoDueDates] = useState<Record<number, string>>({});
   const [newChildTodoTitles, setNewChildTodoTitles] = useState<Record<string, string>>({});
+  const [newChildTodoDueDates, setNewChildTodoDueDates] = useState<Record<string, string>>({});
   const [newDraftTodoTitle, setNewDraftTodoTitle] = useState("");
+  const [newDraftTodoDueDate, setNewDraftTodoDueDate] = useState("");
   const [newDraftChildTitles, setNewDraftChildTitles] = useState<Record<number, string>>({});
+  const [newDraftChildDueDates, setNewDraftChildDueDates] = useState<Record<number, string>>({});
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [rootTodoInputOpen, setRootTodoInputOpen] = useState<Record<number, boolean>>({});
   const [participantSettingsProjectId, setParticipantSettingsProjectId] = useState<number | null>(null);
@@ -1634,6 +1644,28 @@ function ProjectPage({
     todos
       .filter((todo) => todo.id !== todoId)
       .map((todo) => ({ ...todo, children: deleteTodoFromTree(todo.children, todoId) }));
+  const findProjectTodo = (todos: ProjectTodo[], todoId: number): ProjectTodo | undefined => {
+    for (const todo of todos) {
+      if (todo.id === todoId) return todo;
+      const childTodo = findProjectTodo(todo.children, todoId);
+      if (childTodo) return childTodo;
+    }
+    return undefined;
+  };
+  const flattenProjectTodos = (todos: ProjectTodo[]): ProjectTodo[] =>
+    todos.flatMap((todo) => [todo, ...flattenProjectTodos(todo.children)]);
+  const syncProjectTodoToPlanner = (project: Project, todo: ProjectTodo, dueDate = todo.dueDate || "") => {
+    if (!dueDate) return;
+    onCreatePlannerTodo({
+      title: todo.title,
+      area: project.area,
+      subArea: project.subArea,
+      dueDate,
+      urgency: project.urgency,
+      importance: project.importance,
+      progress: 0,
+    });
+  };
 
   const updateProject = (projectId: number, updater: (project: Project) => Project) => {
     setProjects(projects.map((project) => (project.id === projectId ? updater(project) : project)));
@@ -1725,6 +1757,9 @@ function ProjectPage({
         importance: newProject.importance,
         progress: newProject.progress,
       });
+      flattenProjectTodos(newProject.todos).forEach((todo) => {
+        syncProjectTodoToPlanner(newProject, todo);
+      });
     }
     setSelectedProjectId(newProject.id);
 
@@ -1744,7 +1779,9 @@ function ProjectPage({
     setProjectDraftParticipants([]);
     setProjectDraftTodos([]);
     setNewDraftTodoTitle("");
+    setNewDraftTodoDueDate("");
     setNewDraftChildTitles({});
+    setNewDraftChildDueDates({});
     setEditingProjectId(null);
     setIsProjectModalOpen(false);
   };
@@ -1764,25 +1801,20 @@ function ProjectPage({
 
   const addProjectTodo = (projectId: number) => {
     const title = (newTodoTitles[projectId] || "").trim();
+    const dueDate = newTodoDueDates[projectId] || "";
     if (!title) return;
     const sourceProject = projects.find((project) => project.id === projectId);
+    const nextTodo = { id: createProjectTodoId(), title, dueDate, done: false, children: [] };
 
     updateProject(projectId, (project) => ({
       ...project,
-      todos: [...project.todos, { id: createProjectTodoId(), title, done: false, children: [] }],
+      todos: [...project.todos, nextTodo],
     }));
-    if (sourceProject?.dueDate) {
-      onCreatePlannerTodo({
-        title,
-        area: sourceProject.area,
-        subArea: sourceProject.subArea,
-        dueDate: sourceProject.dueDate,
-        urgency: sourceProject.urgency,
-        importance: sourceProject.importance,
-        progress: 0,
-      });
+    if (sourceProject) {
+      syncProjectTodoToPlanner(sourceProject, nextTodo, dueDate || sourceProject.dueDate);
     }
     setNewTodoTitles({ ...newTodoTitles, [projectId]: "" });
+    setNewTodoDueDates({ ...newTodoDueDates, [projectId]: "" });
     setRootTodoInputOpen({ ...rootTodoInputOpen, [projectId]: false });
   };
 
@@ -1843,13 +1875,18 @@ function ProjectPage({
   const addChildTodo = (projectId: number, todoId: number) => {
     const key = `${projectId}-${todoId}`;
     const title = (newChildTodoTitles[key] || "").trim();
+    const dueDate = newChildTodoDueDates[key] || "";
     if (!title) return;
+    const sourceProject = projects.find((project) => project.id === projectId);
+    const nextTodo = { id: createProjectTodoId(), title, dueDate, done: false, children: [] };
 
     updateProjectTodo(projectId, todoId, (todo) => ({
       ...todo,
-      children: [...todo.children, { id: createProjectTodoId(), title, done: false, children: [] }],
+      children: [...todo.children, nextTodo],
     }));
+    if (sourceProject) syncProjectTodoToPlanner(sourceProject, nextTodo, dueDate);
     setNewChildTodoTitles({ ...newChildTodoTitles, [key]: "" });
+    setNewChildTodoDueDates({ ...newChildTodoDueDates, [key]: "" });
   };
 
   const addDraftTodo = () => {
@@ -1858,22 +1895,25 @@ function ProjectPage({
 
     setProjectDraftTodos([
       ...projectDraftTodos,
-      { id: createProjectTodoId(), title, done: false, children: [] },
+      { id: createProjectTodoId(), title, dueDate: newDraftTodoDueDate, done: false, children: [] },
     ]);
     setNewDraftTodoTitle("");
+    setNewDraftTodoDueDate("");
   };
 
   const addDraftChildTodo = (todoId: number) => {
     const title = (newDraftChildTitles[todoId] || "").trim();
+    const dueDate = newDraftChildDueDates[todoId] || "";
     if (!title) return;
 
     setProjectDraftTodos(
       updateTodoTree(projectDraftTodos, todoId, (todo) => ({
         ...todo,
-        children: [...todo.children, { id: createProjectTodoId(), title, done: false, children: [] }],
+        children: [...todo.children, { id: createProjectTodoId(), title, dueDate, done: false, children: [] }],
       }))
     );
     setNewDraftChildTitles({ ...newDraftChildTitles, [todoId]: "" });
+    setNewDraftChildDueDates({ ...newDraftChildDueDates, [todoId]: "" });
   };
 
   if (selectedProject) {
@@ -2034,7 +2074,7 @@ function ProjectPage({
           <div style={projectSummaryItemStyle}>
             <span style={projectSummaryLabelStyle}>참석자</span>
             <div style={projectParticipantSummaryStyle}>
-              <span>👥 {selectedProject.participants.filter((item) => item.status === "accepted").length}</span>
+              <span>👥 {1 + selectedProject.participants.filter((item) => item.status === "accepted").length}</span>
               <button onClick={() => setParticipantSettingsProjectId(selectedProject.id)} style={miniAddButtonStyle}>
                 설정
               </button>
@@ -2093,6 +2133,15 @@ function ProjectPage({
                   style={projectTodoInputStyle}
                   placeholder="새 To do 추가"
                 />
+                <input
+                  type="date"
+                  value={newTodoDueDates[selectedProject.id] || ""}
+                  onChange={(e) =>
+                    setNewTodoDueDates({ ...newTodoDueDates, [selectedProject.id]: e.target.value })
+                  }
+                  style={projectTodoDateInputStyle}
+                  title="To do 마감일"
+                />
 
                 <button onClick={() => addProjectTodo(selectedProject.id)} style={subButtonSmall}>
                   추가
@@ -2111,11 +2160,23 @@ function ProjectPage({
                   todo={todo}
                   depth={0}
                   onUpdate={(todoId, updater) => updateProjectTodo(selectedProject.id, todoId, updater)}
-                onDelete={(todoId) => deleteProjectTodo(selectedProject.id, todoId)}
+                  onDelete={(todoId) => deleteProjectTodo(selectedProject.id, todoId)}
+                  onDueDateChange={(todoId, dueDate) => {
+                    const targetTodo = findProjectTodo(selectedProject.todos, todoId);
+                    updateProjectTodo(selectedProject.id, todoId, (todo) => ({ ...todo, dueDate }));
+                    if (targetTodo) syncProjectTodoToPlanner(selectedProject, { ...targetTodo, dueDate }, dueDate);
+                  }}
                 getNewChildTitle={(todoId) => newChildTodoTitles[`${selectedProject.id}-${todoId}`] || ""}
                 setNewChildTitle={(todoId, value) =>
                   setNewChildTodoTitles({
                     ...newChildTodoTitles,
+                    [`${selectedProject.id}-${todoId}`]: value,
+                  })
+                }
+                getNewChildDueDate={(todoId) => newChildTodoDueDates[`${selectedProject.id}-${todoId}`] || ""}
+                setNewChildDueDate={(todoId, value) =>
+                  setNewChildTodoDueDates({
+                    ...newChildTodoDueDates,
                     [`${selectedProject.id}-${todoId}`]: value,
                   })
                 }
@@ -2166,11 +2227,11 @@ function ProjectPage({
       <div style={pageHeaderStyle}>
         <div>
           <h2 style={{ fontSize: "clamp(20px, 5vw, 36px)", fontWeight: "bold", marginBottom: "8px", whiteSpace: "nowrap" }}>
-            프로젝트 센테
+            프로젝트 센터
           </h2>
 
           <p style={{ color: "#8A8178", margin: 0 }}>
-            큰 목표를 프로젝트 단위로 관리해요.
+            프로젝트를 시스템으로 관리하고 통제해요.
           </p>
         </div>
 
@@ -2210,7 +2271,7 @@ function ProjectPage({
                         {project.area} / {project.subArea}
                       </span>
                       <span style={projectStatusBadgeStyle}>{project.status}</span>
-                      <span style={projectParticipantBadgeStyle}>👥 {project.participants.length}</span>
+                      <span style={projectParticipantBadgeStyle}>👥 {1 + project.participants.filter((item) => item.status === "accepted").length}</span>
                     </div>
 
                     <p style={{ color: "#8A8178", fontSize: "14px", margin: "8px 0 14px" }}>
@@ -2433,9 +2494,16 @@ function ProjectPage({
                       setProjectDraftTodos(deleteTodoFromTree(projectDraftTodos, todoId));
                     }
                   }}
+                  onDueDateChange={(todoId, dueDate) =>
+                    setProjectDraftTodos(updateTodoTree(projectDraftTodos, todoId, (todo) => ({ ...todo, dueDate })))
+                  }
                   getNewChildTitle={(todoId) => newDraftChildTitles[todoId] || ""}
                   setNewChildTitle={(todoId, value) =>
                     setNewDraftChildTitles({ ...newDraftChildTitles, [todoId]: value })
+                  }
+                  getNewChildDueDate={(todoId) => newDraftChildDueDates[todoId] || ""}
+                  setNewChildDueDate={(todoId, value) =>
+                    setNewDraftChildDueDates({ ...newDraftChildDueDates, [todoId]: value })
                   }
                   addChild={addDraftChildTodo}
                 />
@@ -2450,6 +2518,13 @@ function ProjectPage({
                   }}
                   style={projectTodoInputStyle}
                   placeholder="To do를 하나씩 입력"
+                />
+                <input
+                  type="date"
+                  value={newDraftTodoDueDate}
+                  onChange={(e) => setNewDraftTodoDueDate(e.target.value)}
+                  style={projectTodoDateInputStyle}
+                  title="To do 마감일"
                 />
 
                 <button onClick={addDraftTodo} style={subButtonSmall}>
@@ -2504,21 +2579,28 @@ function ProjectTodoItem({
   depth = 0,
   onUpdate,
   onDelete,
+  onDueDateChange,
   getNewChildTitle,
   setNewChildTitle,
+  getNewChildDueDate,
+  setNewChildDueDate,
   addChild,
 }: {
   todo: ProjectTodo;
   depth?: number;
   onUpdate: (todoId: number, updater: (todo: ProjectTodo) => ProjectTodo) => void;
   onDelete: (todoId: number) => void;
+  onDueDateChange: (todoId: number, dueDate: string) => void;
   getNewChildTitle: (todoId: number) => string;
   setNewChildTitle: (todoId: number, value: string) => void;
+  getNewChildDueDate: (todoId: number) => string;
+  setNewChildDueDate: (todoId: number, value: string) => void;
   addChild: (todoId: number) => void;
 }) {
   const [isChildInputOpen, setIsChildInputOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const childTitle = getNewChildTitle(todo.id);
+  const childDueDate = getNewChildDueDate(todo.id);
   const submitChildTodo = () => {
     if (!childTitle.trim()) return;
 
@@ -2536,7 +2618,7 @@ function ProjectTodoItem({
       <div
         style={{
           ...projectTodoRowStyle,
-          gridTemplateColumns: depth > 0 ? "20px 30px 30px 22px 1fr 52px" : "30px 30px 22px 1fr 52px",
+          gridTemplateColumns: depth > 0 ? "20px 30px 30px 22px minmax(0, 1fr) 132px 52px" : "30px 30px 22px minmax(0, 1fr) 132px 52px",
         }}
       >
         {depth > 0 && <div style={projectSubTodoMarkerStyle}>ㄴ</div>}
@@ -2574,6 +2656,13 @@ function ProjectTodoItem({
             fontWeight: depth === 0 ? "800" : "500",
           }}
         />
+        <input
+          type="date"
+          value={todo.dueDate || ""}
+          onChange={(e) => onDueDateChange(todo.id, e.target.value)}
+          style={projectTodoDateInputStyle}
+          title="마감일"
+        />
 
         <button onClick={() => onDelete(todo.id)} style={smallDangerButtonStyle}>
           삭제
@@ -2588,8 +2677,11 @@ function ProjectTodoItem({
             depth={depth + 1}
             onUpdate={onUpdate}
             onDelete={onDelete}
+            onDueDateChange={onDueDateChange}
             getNewChildTitle={getNewChildTitle}
             setNewChildTitle={setNewChildTitle}
+            getNewChildDueDate={getNewChildDueDate}
+            setNewChildDueDate={setNewChildDueDate}
             addChild={addChild}
           />
         ))}
@@ -2605,6 +2697,13 @@ function ProjectTodoItem({
               style={projectSubTodoInputStyle}
               placeholder="하위 To do 입력"
               autoFocus
+            />
+            <input
+              type="date"
+              value={childDueDate}
+              onChange={(e) => setNewChildDueDate(todo.id, e.target.value)}
+              style={projectTodoDateInputStyle}
+              title="하위 To do 마감일"
             />
 
             <button onClick={submitChildTodo} style={smallGhostButtonStyle}>
@@ -2673,14 +2772,21 @@ function ProjectParticipantSettingsModal({
           <div style={projectOwnerRowStyle}>
             <div>
               <strong>{project.ownerEmail}</strong>
-              <div style={{ color: "#8A8178", fontSize: "12px" }}>소유주</div>
+              <div style={{ color: "#8A8178", fontSize: "12px" }}>소유주 · 참석자 · 수락 완료</div>
             </div>
           </div>
+          {project.participants.length === 0 && (
+            <div style={{ color: "#8A8178", fontSize: "13px" }}>
+              아직 초대한 참석자가 없어요.
+            </div>
+          )}
           {project.participants.map((participant) => (
             <div key={participant.email} style={projectParticipantSettingRowStyle}>
               <div style={{ minWidth: 0 }}>
                 <strong>{participant.email}</strong>
-                <div style={{ color: "#8A8178", fontSize: "12px" }}>{participant.status}</div>
+                <div style={{ color: "#8A8178", fontSize: "12px" }}>
+                  초대 상태 · {participant.status === "pending" ? "대기중" : participant.status === "accepted" ? "수락 완료" : "거절됨"}
+                </div>
               </div>
               <label style={projectPermissionLabelStyle}>
                 <input
@@ -2959,7 +3065,7 @@ function RecordPage({
           </h2>
 
           <p style={{ color: "#8A8178", margin: 0 }}>
-            일과 프로젝트의 흔적을 모아두는 공간이에요.
+            나의 모든 기록을 분류하고 관리해요.
           </p>
         </div>
 
@@ -3804,6 +3910,14 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
     if (accessToken) loadGoogleCalendar(accessToken, next);
   };
 
+  const moveCalendarTo = (part: "year" | "month", value: number) => {
+    const next = new Date(calendarDate);
+    if (part === "year") next.setFullYear(value);
+    if (part === "month") next.setMonth(value);
+    setCalendarDate(next);
+    if (accessToken) loadGoogleCalendar(accessToken, next);
+  };
+
   const formatDateTimeLocal = (date: Date) => {
     return formatDateTimeLocalValue(date);
   };
@@ -4303,7 +4417,30 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
         <div style={calendarTitleRowStyle}>
           <div>
             <div style={calendarMonthTitleStyle}>
-              {calendarDate.getFullYear()}년 {calendarDate.getMonth() + 1}월
+              <select
+                value={calendarDate.getFullYear()}
+                onChange={(e) => moveCalendarTo("year", Number(e.target.value))}
+                style={calendarTitleSelectStyle}
+                aria-label="년도 선택"
+              >
+                {Array.from({ length: 15 }, (_, index) => calendarDate.getFullYear() - 7 + index).map((year) => (
+                  <option key={year} value={year}>
+                    {year}년
+                  </option>
+                ))}
+              </select>
+              <select
+                value={calendarDate.getMonth()}
+                onChange={(e) => moveCalendarTo("month", Number(e.target.value))}
+                style={calendarTitleSelectStyle}
+                aria-label="월 선택"
+              >
+                {Array.from({ length: 12 }, (_, index) => (
+                  <option key={index} value={index}>
+                    {index + 1}월
+                  </option>
+                ))}
+              </select>
             </div>
             <div style={calendarRangeTextStyle}>
               {weekDays[0].toLocaleDateString("ko-KR", { month: "long", day: "numeric" })} -{" "}
@@ -5191,12 +5328,16 @@ const googleFieldBaseStyle = {
 
 const googleDateInputStyle = {
   ...googleFieldBaseStyle,
-  width: "150px",
+  width: "176px",
+  minWidth: "176px",
+  fontSize: "14px",
 };
 
 const googleTimeInputStyle = {
   ...googleFieldBaseStyle,
-  width: "108px",
+  width: "132px",
+  minWidth: "132px",
+  fontSize: "14px",
 };
 
 const googleTimezoneTextStyle = {
@@ -5991,6 +6132,21 @@ const calendarMonthTitleStyle = {
   color: "#202124",
   fontSize: "26px",
   fontWeight: "600",
+  display: "flex",
+  alignItems: "center",
+  gap: "8px",
+};
+
+const calendarTitleSelectStyle = {
+  border: "1px solid #DADCE0",
+  borderRadius: "10px",
+  background: "#FFFFFF",
+  color: "#202124",
+  fontSize: "22px",
+  fontWeight: "700",
+  padding: "8px 12px",
+  outline: "none",
+  cursor: "pointer",
 };
 
 const calendarRangeTextStyle = {
@@ -6573,7 +6729,7 @@ const projectRootTodoAddRowStyle = {
 
 const projectTodoInlineAddStyle = {
   display: "grid",
-  gridTemplateColumns: "1fr 64px",
+  gridTemplateColumns: "minmax(0, 1fr) 132px 64px",
   gap: "8px",
   background: "#FFFFFF",
   border: "1px solid #DDE5EE",
@@ -6723,6 +6879,14 @@ const projectTodoInputStyle = {
   boxSizing: "border-box" as const,
 };
 
+const projectTodoDateInputStyle = {
+  ...projectTodoInputStyle,
+  border: "1px solid #E5E8EB",
+  background: "#FFFFFF",
+  color: "#6B7280",
+  fontSize: "13px",
+};
+
 const projectTodoCollapseButtonStyle = {
   width: "30px",
   height: "30px",
@@ -6746,7 +6910,7 @@ const subTodoListStyle = {
 
 const subTodoAddRowStyle = {
   display: "grid",
-  gridTemplateColumns: "1fr 52px",
+  gridTemplateColumns: "minmax(0, 1fr) 132px 52px",
   gap: "8px",
 };
 
@@ -6758,7 +6922,7 @@ const projectSubTodoInputStyle = {
 
 const projectTodoAddBoxStyle = {
   display: "grid",
-  gridTemplateColumns: "1fr 72px",
+  gridTemplateColumns: "minmax(0, 1fr) 132px 72px",
   gap: "8px",
   background: "#FFFCF8",
   border: "1px solid #E8E1D8",
