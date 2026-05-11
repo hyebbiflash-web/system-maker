@@ -4,7 +4,7 @@ import LoginPage from "./login";
 import { getRedirectResult } from "firebase/auth";
 import { useEffect, useState, type Dispatch, type KeyboardEvent, type SetStateAction } from "react";
 import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
-import { CalendarDays, ClipboardList, FolderKanban, NotebookPen, Settings, Trash2 } from "lucide-react";
+import { CalendarDays, ClipboardList, FolderKanban, ListChecks, NotebookPen, RefreshCw, Settings, Trash2 } from "lucide-react";
 import { auth, calendarProvider } from "./firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, setDoc, onSnapshot } from "firebase/firestore";
@@ -150,6 +150,8 @@ const notificationSoundOptions = [
   { value: "pop", label: "작은 팝" },
   { value: "none", label: "소리 없음" },
 ];
+const MAIN_COLOR = "#574C00";
+const IVORY_COLOR = "#FEF9DB";
 
 const playNotificationSound = (sound: string) => {
   if (sound === "none" || typeof window === "undefined") return;
@@ -158,27 +160,33 @@ const playNotificationSound = (sound: string) => {
   if (!AudioContextClass) return;
 
   const context = new AudioContextClass();
-  const oscillator = context.createOscillator();
-  const gain = context.createGain();
   const now = context.currentTime;
-  const soundMap: Record<string, { frequency: number; type: OscillatorType; duration: number }> = {
-    soft: { frequency: 660, type: "sine", duration: 0.16 },
-    click: { frequency: 520, type: "triangle", duration: 0.08 },
-    chime: { frequency: 880, type: "sine", duration: 0.22 },
-    pop: { frequency: 740, type: "square", duration: 0.1 },
+  const soundMap: Record<string, { frequencies: number[]; type: OscillatorType; toneDuration: number; gap: number }> = {
+    soft: { frequencies: [660, 880], type: "sine", toneDuration: 0.18, gap: 0.08 },
+    click: { frequencies: [520, 620], type: "triangle", toneDuration: 0.12, gap: 0.06 },
+    chime: { frequencies: [880, 1175], type: "sine", toneDuration: 0.22, gap: 0.1 },
+    pop: { frequencies: [740, 540], type: "square", toneDuration: 0.12, gap: 0.08 },
   };
   const tone = soundMap[sound] || soundMap.soft;
 
-  oscillator.type = tone.type;
-  oscillator.frequency.setValueAtTime(tone.frequency, now);
-  gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(0.12, now + 0.02);
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + tone.duration);
-  oscillator.connect(gain);
-  gain.connect(context.destination);
-  oscillator.start(now);
-  oscillator.stop(now + tone.duration + 0.02);
-  window.setTimeout(() => void context.close().catch(() => undefined), (tone.duration + 0.08) * 1000);
+  tone.frequencies.forEach((frequency, index) => {
+    const startAt = now + index * (tone.toneDuration + tone.gap);
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = tone.type;
+    oscillator.frequency.setValueAtTime(frequency, startAt);
+    gain.gain.setValueAtTime(0.0001, startAt);
+    gain.gain.exponentialRampToValueAtTime(0.13, startAt + 0.025);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startAt + tone.toneDuration);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start(startAt);
+    oscillator.stop(startAt + tone.toneDuration + 0.02);
+  });
+  window.setTimeout(
+    () => void context.close().catch(() => undefined),
+    (tone.frequencies.length * (tone.toneDuration + tone.gap) + 0.12) * 1000
+  );
 };
 
 const linkedRecordDescriptions: Record<Area, string> = {
@@ -188,7 +196,7 @@ const linkedRecordDescriptions: Record<Area, string> = {
 };
 
 const recordColorPalette = [
-  "#B40023",
+  MAIN_COLOR,
   "#D64B2A",
   "#C56A00",
   "#6B7D00",
@@ -338,7 +346,7 @@ export default function Home() {
   const [calendarEvents, setCalendarEvents] = useState<GoogleCalendarEvent[]>([]);
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
   const [isPlannerSettingsOpen, setIsPlannerSettingsOpen] = useState(false);
-  const [plannerNotificationColor, setPlannerNotificationColor] = useState("#B40023");
+  const [plannerNotificationColor, setPlannerNotificationColor] = useState("#574C00");
   const [plannerNotificationSound, setPlannerNotificationSound] = useState("soft");
   const [plannerNotificationVibration, setPlannerNotificationVibration] = useState(true);
   const [plannerNotificationPopupEnabled, setPlannerNotificationPopupEnabled] = useState(true);
@@ -381,6 +389,7 @@ export default function Home() {
   const currentDay = currentDate.getDay();
   const diff = currentDay === 0 ? -6 : 1 - currentDay;
   startOfWeek.setDate(currentDate.getDate() + diff);
+  startOfWeek.setHours(0, 0, 0, 0);
 
   const weekDays = Array.from({ length: 7 }, (_, i) => {
     const date = new Date(startOfWeek);
@@ -438,6 +447,38 @@ export default function Home() {
   const goToday = () => {
     setCurrentDate(new Date());
   };
+
+  const getPlannerWeekMeta = (date: Date) => {
+    const monday = new Date(date);
+    const day = monday.getDay();
+    monday.setDate(date.getDate() + (day === 0 ? -6 : 1 - day));
+    const thursday = new Date(monday);
+    thursday.setDate(monday.getDate() + 3);
+    const monthStart = new Date(thursday.getFullYear(), thursday.getMonth(), 1);
+    const firstThursday = new Date(monthStart);
+    firstThursday.setDate(1 + ((4 - firstThursday.getDay() + 7) % 7));
+    const week = Math.floor((thursday.getTime() - firstThursday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+    return { year: thursday.getFullYear(), month: thursday.getMonth(), week: Math.max(1, week) };
+  };
+  const getPlannerWeeksInMonth = (year: number, month: number) => {
+    const lastDate = new Date(year, month + 1, 0).getDate();
+    return Array.from({ length: 6 }, (_, index) => index + 1).filter((week) => {
+      const thursday = new Date(year, month, 1);
+      thursday.setDate(1 + ((4 - thursday.getDay() + 7) % 7) + (week - 1) * 7);
+      return thursday.getMonth() === month && thursday.getDate() <= lastDate;
+    });
+  };
+  const movePlannerToWeek = (year: number, month: number, week: number) => {
+    const firstThursday = new Date(year, month, 1);
+    firstThursday.setDate(1 + ((4 - firstThursday.getDay() + 7) % 7));
+    const targetThursday = new Date(firstThursday);
+    targetThursday.setDate(firstThursday.getDate() + (week - 1) * 7);
+    const targetMonday = new Date(targetThursday);
+    targetMonday.setDate(targetThursday.getDate() - 3);
+    setCurrentDate(targetMonday);
+  };
+  const plannerWeekMeta = getPlannerWeekMeta(currentDate);
+  const plannerWeekOptions = getPlannerWeeksInMonth(plannerWeekMeta.year, plannerWeekMeta.month);
 
   const sortTodos = (todoList: Todo[]) => {
     return [...todoList].sort((a, b) => {
@@ -877,7 +918,7 @@ export default function Home() {
         summary: `[프로젝트] ${title}`,
         description: `${area} / ${subArea}`,
         calendarSummary: "프로젝트",
-        calendarColor: "#B40023",
+        calendarColor: "#574C00",
         start: { dateTime: projectTodoStart.toISOString() },
         end: { dateTime: projectTodoEnd.toISOString() },
       },
@@ -1043,6 +1084,7 @@ if (!user) {
             onTrashItem={addTrashItem}
             todos={todos}
             onToggleTodo={toggleDone}
+            onOpenTodoList={() => setIsTodoListOpen(true)}
           />
         ) : activePage === "project" ? (
           <ProjectPage
@@ -1070,11 +1112,43 @@ if (!user) {
                 </h2>
 
                 <p style={{ color: "#8A8178", margin: 0 }}>주 단위로 일정을 관리합니다.</p>
+                <div style={plannerWeekPickerStyle}>
+                  <select
+                    value={plannerWeekMeta.year}
+                    onChange={(e) => movePlannerToWeek(Number(e.target.value), plannerWeekMeta.month, plannerWeekMeta.week)}
+                    style={plannerWeekSelectStyle}
+                    aria-label="플래너 년도 선택"
+                  >
+                    {Array.from({ length: 7 }, (_, index) => plannerWeekMeta.year - 3 + index).map((year) => (
+                      <option key={year} value={year}>{year}년</option>
+                    ))}
+                  </select>
+                  <select
+                    value={plannerWeekMeta.month}
+                    onChange={(e) => movePlannerToWeek(plannerWeekMeta.year, Number(e.target.value), 1)}
+                    style={plannerWeekSelectStyle}
+                    aria-label="플래너 월 선택"
+                  >
+                    {Array.from({ length: 12 }, (_, index) => (
+                      <option key={index} value={index}>{index + 1}월</option>
+                    ))}
+                  </select>
+                  <select
+                    value={Math.min(plannerWeekMeta.week, plannerWeekOptions.at(-1) || 1)}
+                    onChange={(e) => movePlannerToWeek(plannerWeekMeta.year, plannerWeekMeta.month, Number(e.target.value))}
+                    style={plannerWeekSelectStyle}
+                    aria-label="플래너 주차 선택"
+                  >
+                    {plannerWeekOptions.map((week) => (
+                      <option key={week} value={week}>{week}째주</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div style={{ display: "flex", gap: "8px" }}>
                 <button onClick={() => setIsTodoListOpen(true)} style={todayButtonStyle}>
-                  ✓ 할일모음
+                  할 일 모음
                 </button>
                 <button onClick={() => openScheduleModal(new Date().toDateString())} style={todayButtonStyle}>
                   + 일정 추가
@@ -1088,7 +1162,7 @@ if (!user) {
                   + 할 일 추가
                 </button>
                 <button onClick={() => setIsPlannerSettingsOpen(true)} style={settingsIconButtonStyle} title="알림 설정">
-                  <Settings size={24} strokeWidth={2.4} />
+                  <Settings size={29} strokeWidth={2.5} />
                 </button>
 
                 <button onClick={goPrevWeek} style={weekButtonStyle}>
@@ -1618,7 +1692,7 @@ function NotificationSettingsModal({
               }}
             >
               <span>{option.label}</span>
-              <span style={{ fontSize: "12px", color: sound === option.value ? "#B40023" : "#8A8178" }}>
+              <span style={{ fontSize: "12px", color: sound === option.value ? "#574C00" : "#8A8178" }}>
                 {option.value === "none" ? "무음" : "듣기"}
               </span>
             </button>
@@ -3071,7 +3145,7 @@ function ProjectTodoItem({
           type="checkbox"
           checked={todo.done}
           onChange={() => onUpdate(todo.id, (currentTodo) => ({ ...currentTodo, done: !currentTodo.done }))}
-          style={{ width: "18px", height: "18px", accentColor: "#B40023" }}
+          style={{ width: "18px", height: "18px", accentColor: "#574C00" }}
         />
 
         <input
@@ -4104,6 +4178,7 @@ function CalendarPage({
   onTrashItem,
   todos,
   onToggleTodo,
+  onOpenTodoList,
 }: {
   events: GoogleCalendarEvent[];
   setEvents: Dispatch<SetStateAction<GoogleCalendarEvent[]>>;
@@ -4112,6 +4187,7 @@ function CalendarPage({
   onTrashItem: (item: Omit<TrashItem, "id" | "deletedAt">) => void;
   todos: Todo[];
   onToggleTodo: (todoId: number) => void;
+  onOpenTodoList: () => void;
 }) {
   const [calendarDate, setCalendarDate] = useState(new Date());
   const [isConnected, setIsConnected] = useState(false);
@@ -4122,7 +4198,7 @@ function CalendarPage({
   const [isCalendarSettingsOpen, setIsCalendarSettingsOpen] = useState(false);
   const [notificationSound, setNotificationSound] = useState("soft");
   const [notificationVibration, setNotificationVibration] = useState(true);
-  const [notificationColor, setNotificationColor] = useState("#B40023");
+  const [notificationColor, setNotificationColor] = useState("#574C00");
   const [notificationPopupEnabled, setNotificationPopupEnabled] = useState(true);
   const [calendarToast, setCalendarToast] = useState("");
   const [calendarNotificationPopup, setCalendarNotificationPopup] = useState("");
@@ -4856,7 +4932,7 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
             구글 캘린더 일정이 시간대에 맞춰 표시됩니다.
           </p>
           {calendarError && (
-            <p style={{ color: "#B40023", margin: "10px 0 0", fontSize: "14px" }}>
+            <p style={{ color: "#574C00", margin: "10px 0 0", fontSize: "14px" }}>
               {calendarError}
             </p>
           )}
@@ -4871,11 +4947,17 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
               opacity: isCalendarLoading ? 0.6 : 1,
             }}
           >
+            <RefreshCw size={16} strokeWidth={2.4} />
             {isCalendarLoading
               ? "불러오는 중"
               : isConnected
                 ? "구글 일정 새로고침"
                 : "구글 캘린더 연결"}
+          </button>
+
+          <button onClick={onOpenTodoList} style={todayButtonStyle}>
+            <ListChecks size={16} strokeWidth={2.4} />
+            할 일 모음
           </button>
 
           <button onClick={() => openCreateEventModal()} style={todayButtonStyle}>
@@ -4892,7 +4974,7 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
           </button>
 
           <button onClick={() => setIsCalendarSettingsOpen(true)} style={settingsIconButtonStyle} title="알림 설정">
-            <Settings size={24} strokeWidth={2.4} />
+            <Settings size={29} strokeWidth={2.5} />
           </button>
 
           <button onClick={goPrevWeek} style={weekButtonStyle}>
@@ -6396,7 +6478,7 @@ function PlannerMemoTodoList({
             type="checkbox"
             checked={todo.done}
             onChange={() => toggleDone(todo.id)}
-            style={{ width: "16px", height: "16px", accentColor: "#B40023" }}
+            style={{ width: "16px", height: "16px", accentColor: "#574C00" }}
           />
           <button
             onClick={() => openEditTodoModal(todo)}
@@ -6405,7 +6487,7 @@ function PlannerMemoTodoList({
               border: "none",
               background: "transparent",
               textAlign: "left",
-              color: todo.done ? "#B40023" : "#191f28",
+              color: todo.done ? "#574C00" : "#191f28",
               textDecoration: todo.done ? "line-through" : "none",
               cursor: "pointer",
             }}
@@ -6445,7 +6527,7 @@ function TodoListGroup({
               type="checkbox"
               checked={todo.done}
               onChange={() => toggleDone(todo.id)}
-              style={{ width: "16px", height: "16px", accentColor: "#B40023" }}
+              style={{ width: "16px", height: "16px", accentColor: "#574C00" }}
             />
             <button
               onClick={() => openTodo(todo)}
@@ -6455,7 +6537,7 @@ function TodoListGroup({
                 background: "transparent",
                 textAlign: "left",
                 cursor: "pointer",
-                color: todo.done ? "#B40023" : "#191f28",
+                color: todo.done ? "#574C00" : "#191f28",
               }}
             >
               [{todo.area} / {todo.subArea}] {todo.title}
@@ -6504,7 +6586,7 @@ function TodoAreaGroups({
                     style={{
                       width: "18px",
                       height: "18px",
-                      accentColor: "#B40023",
+                      accentColor: "#574C00",
                       cursor: "pointer",
                     }}
                   />
@@ -6520,7 +6602,7 @@ function TodoAreaGroups({
                       cursor: "grab",
                       fontSize: "14px",
                       textDecoration: todo.done ? "line-through" : "none",
-                      color: todo.done ? "#B40023" : "#191f28",
+                      color: todo.done ? "#574C00" : "#191f28",
                     }}
                   >
                     <div style={{ display: "flex", alignItems: "center", minWidth: 0, gap: "8px" }}>
@@ -6562,9 +6644,9 @@ function MenuItem({
       style={{
         padding: "10px 9px",
         borderRadius: "10px",
-        background: active ? "#FFF4F6" : "#FFFCF8",
-        border: active ? "1px solid #F0BAC6" : "1px solid #F0ECE6",
-        color: active ? "#B40023" : "#4e5968",
+        background: active ? "#FEF9DB" : "#FFFCF8",
+        border: active ? "1px solid #D8CE91" : "1px solid #F0ECE6",
+        color: active ? "#574C00" : "#4e5968",
         fontWeight: active ? "bold" : "normal",
         cursor: "pointer",
         fontSize: "13px",
@@ -6615,12 +6697,12 @@ function StarPicker({ value, onChange }: { value: number; onChange: (value: numb
             width: "40px",
             height: "40px",
             border: "none",
-            background: value >= star ? "#FFF4F6" : "#f7f8fa",
+            background: value >= star ? "#FEF9DB" : "#f7f8fa",
             borderRadius: "12px",
             cursor: "pointer",
             fontSize: "20px",
             fontWeight: "900",
-            color: value >= star ? "#B40023" : "#d1d6db",
+            color: value >= star ? "#574C00" : "#d1d6db",
           }}
         >
           ★
@@ -6639,7 +6721,7 @@ function ProgressBarInput({ value, onChange }: { value: number; onChange: (value
         max="100"
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        style={{ flex: 1, accentColor: "#B40023", cursor: "pointer" }}
+        style={{ flex: 1, accentColor: "#574C00", cursor: "pointer" }}
       />
 
       <div style={progressValueStyle}>
@@ -6658,13 +6740,13 @@ function ProgressBarInput({ value, onChange }: { value: number; onChange: (value
             border: "none",
             outline: "none",
             fontWeight: "bold",
-            color: "#B40023",
+            color: "#574C00",
             fontSize: "14px",
             textAlign: "center",
             padding: 0,
           }}
         />
-        <span style={{ fontWeight: "bold", color: "#B40023", fontSize: "14px" }}>%</span>
+        <span style={{ fontWeight: "bold", color: "#574C00", fontSize: "14px" }}>%</span>
       </div>
     </div>
   );
@@ -6703,9 +6785,9 @@ const notificationOptionButtonStyle = {
 };
 
 const notificationOptionButtonActiveStyle = {
-  border: "1px solid #F0BAC6",
-  background: "#FFF1F3",
-  color: "#B40023",
+  border: "1px solid #D8CE91",
+  background: "#FEF9DB",
+  color: "#574C00",
 };
 
 const notificationPopupBackdropStyle = {
@@ -6725,6 +6807,26 @@ const notificationPopupBoxStyle = {
   background: "#FFFFFF",
   padding: "22px",
   boxShadow: "0 22px 60px rgba(25,31,40,0.22)",
+};
+
+const plannerWeekPickerStyle = {
+  display: "flex",
+  gap: "6px",
+  flexWrap: "wrap" as const,
+  marginTop: "10px",
+};
+
+const plannerWeekSelectStyle = {
+  height: "34px",
+  borderRadius: "10px",
+  border: "1px solid #E0DBC6",
+  background: IVORY_COLOR,
+  color: MAIN_COLOR,
+  fontSize: "13px",
+  fontWeight: "800",
+  padding: "0 10px",
+  outline: "none",
+  cursor: "pointer",
 };
 
 const mobileTabDockStyle = {
@@ -6766,9 +6868,9 @@ const mobileTabButtonStyle = {
 };
 
 const mobileTabButtonActiveStyle = {
-  background: "#FFF1F3",
-  border: "1px solid #F3C5CE",
-  color: "#B40023",
+  background: "#FEF9DB",
+  border: "1px solid #D8CE91",
+  color: "#574C00",
   transform: "translateY(-1px)",
   boxShadow: "0 8px 18px rgba(180,0,35,0.10)",
 };
@@ -7087,12 +7189,12 @@ const areaBoxStyle = {
 const areaLabelStyle = {
   display: "inline-block",
   background: "#FFF7F7",
-  border: "1px solid #F0D5DB",
+  border: "1px solid #D8CE91",
   borderRadius: "999px",
   padding: "2px 8px",
   fontSize: "10px",
   fontWeight: "800",
-  color: "#B40023",
+  color: "#574C00",
   marginBottom: "5px",
   letterSpacing: "-0.2px",
 };
@@ -7212,6 +7314,8 @@ const plannerScheduleItemStyle = {
   fontSize: "13px",
   fontWeight: "800",
   textAlign: "left" as const,
+  display: "flex",
+  alignItems: "center",
   cursor: "pointer",
   overflow: "hidden",
   textOverflow: "ellipsis",
@@ -7241,7 +7345,7 @@ const projectSubTodoBoxStyle = {
 };
 
 const projectSubTodoMarkerStyle = {
-  color: "#B40023",
+  color: "#574C00",
   fontSize: "14px",
   fontWeight: "900",
   textAlign: "center" as const,
@@ -7264,8 +7368,8 @@ const projectListItemStyle = {
 const projectStatusBadgeStyle = {
   padding: "6px 12px",
   borderRadius: "999px",
-  background: "#FFF4F6",
-  color: "#B40023",
+  background: "#FEF9DB",
+  color: "#574C00",
   fontSize: "13px",
   fontWeight: "bold",
 };
@@ -7326,7 +7430,7 @@ const projectParticipantSettingRowStyle = {
 };
 
 const projectOwnerRowStyle = {
-  border: "1px solid #F0D5DB",
+  border: "1px solid #D8CE91",
   borderRadius: "12px",
   padding: "10px",
   background: "#FFF7F7",
@@ -7371,7 +7475,7 @@ const projectProgressTrackStyle = {
 
 const projectProgressFillStyle = {
   height: "100%",
-  background: "#B40023",
+  background: "#574C00",
 };
 
 const projectMetaColumnStyle = {
@@ -7527,7 +7631,7 @@ const projectSummaryLabelStyle = {
 };
 
 const projectProgressTextStyle = {
-  color: "#B40023",
+  color: "#574C00",
   fontSize: "20px",
   fontWeight: "bold",
 };
@@ -7539,7 +7643,7 @@ const projectTodoCountStyle = {
 };
 
 const projectDueDateTextStyle = {
-  color: "#B40023",
+  color: "#574C00",
   fontSize: "13px",
   fontWeight: "bold",
   margin: "-6px 0 12px",
@@ -7595,16 +7699,16 @@ const projectTodoDragHandleStyle = {
 
 const projectTodoDragHandleActiveStyle = {
   cursor: "grabbing",
-  background: "#FFF1F3",
-  border: "1px solid #F3B4C0",
-  color: "#B40023",
+  background: "#FEF9DB",
+  border: "1px solid #D8CE91",
+  color: "#574C00",
   transform: "scale(1.04)",
   boxShadow: "0 4px 10px rgba(180,0,35,0.12)",
 };
 
 const projectTodoDraggingStyle = {
   opacity: 0.62,
-  background: "#FFF7F8",
+  background: "#FEF9DB",
   transform: "scale(0.995)",
   boxShadow: "0 8px 18px rgba(180,0,35,0.08)",
 };
@@ -7621,7 +7725,7 @@ const projectTodoDropLineStyle = {
   right: 0,
   height: "2px",
   borderRadius: "999px",
-  background: "#B40023",
+  background: "#574C00",
   boxShadow: "0 0 0 4px rgba(180,0,35,0.08)",
 };
 
@@ -7710,9 +7814,9 @@ const recordChoiceLabelStyle = {
 
 const recordSubChoiceLabelStyle = {
   ...recordChoiceLabelStyle,
-  color: "#B40023",
+  color: "#574C00",
   paddingLeft: "10px",
-  borderLeft: "3px solid #B40023",
+  borderLeft: "3px solid #574C00",
 };
 
 const recordAllHintStyle = {
@@ -7753,9 +7857,9 @@ const recordThinButtonStyle = {
 };
 
 const recordThinButtonActiveStyle = {
-  background: "#FFF4F6",
-  border: "1px solid #B40023",
-  color: "#B40023",
+  background: "#FEF9DB",
+  border: "1px solid #574C00",
+  color: "#574C00",
 };
 
 const recordSubThinButtonStyle = {
@@ -7820,8 +7924,8 @@ const recordMemoDeleteButtonStyle = {
   height: "30px",
   borderRadius: "10px",
   border: "none",
-  background: "#FFF4F6",
-  color: "#B40023",
+  background: "#FEF9DB",
+  color: "#574C00",
   fontSize: "12px",
   fontWeight: "800",
   cursor: "pointer",
@@ -7947,8 +8051,8 @@ const smallDangerButtonStyle = {
   height: "36px",
   borderRadius: "12px",
   border: "none",
-  background: "#FFF4F6",
-  color: "#B40023",
+  background: "#FEF9DB",
+  color: "#574C00",
   fontSize: "13px",
   fontWeight: "bold",
   cursor: "pointer",
@@ -8076,7 +8180,7 @@ const redButtonFull = {
   height: "64px",
   borderRadius: "22px",
   border: "none",
-  background: "#B40023",
+  background: "#574C00",
   color: "white",
   fontSize: "20px",
   fontWeight: "bold",
@@ -8090,7 +8194,7 @@ const deleteFullButtonStyle = {
   borderRadius: "20px",
   border: "none",
   background: "#f2f4f6",
-  color: "#B40023",
+  color: "#574C00",
   fontSize: "17px",
   fontWeight: "bold",
   marginTop: "12px",
@@ -8110,14 +8214,14 @@ const weekButtonStyle = {
 
 const settingsIconButtonStyle = {
   ...weekButtonStyle,
-  width: "48px",
-  height: "48px",
+  width: "54px",
+  height: "54px",
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  color: "#B40023",
-  background: "#FFF7F8",
-  border: "1px solid #F0D5DB",
+  color: "#574C00",
+  background: "#FEF9DB",
+  border: "1px solid #D8CE91",
 };
 
 const todayButtonStyle = {
@@ -8128,6 +8232,10 @@ const todayButtonStyle = {
   background: "#FFFCF8",
   fontSize: "15px",
   fontWeight: "bold",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "7px",
   cursor: "pointer",
 };
 
@@ -8136,7 +8244,7 @@ const plannerQuickAddButtonStyle = {
   height: "44px",
   borderRadius: "50%",
   border: "none",
-  background: "#B40023",
+  background: "#574C00",
   color: "white",
   fontSize: "26px",
   fontWeight: "500",
