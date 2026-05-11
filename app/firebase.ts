@@ -17,9 +17,9 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 
 export const googleProvider = new GoogleAuthProvider();
-googleProvider.addScope("https://www.googleapis.com/auth/calendar.events");
-googleProvider.setCustomParameters({ prompt: "consent" });
+googleProvider.addScope("https://www.googleapis.com/auth/calendar");
+googleProvider.setCustomParameters({ include_granted_scopes: "true" });
 
 export const calendarProvider = new GoogleAuthProvider();
-calendarProvider.addScope("https://www.googleapis.com/auth/calendar.events");
-calendarProvider.setCustomParameters({ prompt: "consent" });
+calendarProvider.addScope("https://www.googleapis.com/auth/calendar");
+calendarProvider.setCustomParameters({ include_granted_scopes: "true" });
