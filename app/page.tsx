@@ -3199,6 +3199,7 @@ function CalendarPage({
   const [eventTitle, setEventTitle] = useState("");
   const [draggedEventId, setDraggedEventId] = useState<string | null>(null);
   const [dragOverDate, setDragOverDate] = useState<string | null>(null);  
+  const [resizingEvent, setResizingEvent] = useState<{ id: string; edge: "start" | "end" } | null>(null);
   const [isCreatingEvent, setIsCreatingEvent] = useState(false);
   const [createStartY, setCreateStartY] = useState(0);
   const [createDate, setCreateDate] = useState<Date | null>(null);
@@ -3302,6 +3303,24 @@ const handleEventDrop = async (targetDate: Date) => {
 
   setDraggedEventId(null);
   setDragOverDate(null);
+};
+const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
+  if (!accessToken || event.id.startsWith("planner-") || !event.start?.dateTime || !event.end?.dateTime) return;
+
+  await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(event.calendarId || "primary")}/events/${event.id}`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        start: { dateTime: new Date(event.start.dateTime).toISOString(), timeZone: "Asia/Seoul" },
+        end: { dateTime: new Date(event.end.dateTime).toISOString(), timeZone: "Asia/Seoul" },
+      }),
+    }
+  );
 };
   const getErrorMessage = (error: unknown) => {
     if (error instanceof Error) return error.message;
@@ -3969,6 +3988,37 @@ const handleEventDrop = async (targetDate: Date) => {
                       });
                     }}
                     onMouseMove={(e) => {
+                      if (resizingEvent) {
+                        const targetEvent = events.find((event) => event.id === resizingEvent.id);
+                        if (!targetEvent?.start?.dateTime || !targetEvent.end?.dateTime) return;
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        const { hours, minutes } = getTimeFromY(e.clientY, rect.top);
+                        const nextTime = new Date(date);
+                        nextTime.setHours(hours, minutes, 0, 0);
+                        const start = new Date(targetEvent.start.dateTime);
+                        const end = new Date(targetEvent.end.dateTime);
+
+                        if (resizingEvent.edge === "start") {
+                          if (nextTime >= end) return;
+                          setEvents((currentEvents) =>
+                            currentEvents.map((event) =>
+                              event.id === resizingEvent.id
+                                ? { ...event, start: { dateTime: nextTime.toISOString() } }
+                                : event
+                            )
+                          );
+                        } else {
+                          if (nextTime <= start) return;
+                          setEvents((currentEvents) =>
+                            currentEvents.map((event) =>
+                              event.id === resizingEvent.id
+                                ? { ...event, end: { dateTime: nextTime.toISOString() } }
+                                : event
+                            )
+                          );
+                        }
+                        return;
+                      }
                       if (!isCreatingEvent || !createDate) return;
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                       const { hours, minutes } = getTimeFromY(e.clientY, rect.top);
@@ -3981,6 +4031,12 @@ const handleEventDrop = async (targetDate: Date) => {
                       }
                     }}
                     onMouseUp={(e) => {
+                      if (resizingEvent) {
+                        const resizedEvent = events.find((event) => event.id === resizingEvent.id);
+                        if (resizedEvent) void patchGoogleEventTime(resizedEvent);
+                        setResizingEvent(null);
+                        return;
+                      }
                       if (!isCreatingEvent || !createDate) {
                         setIsCreatingEvent(false);
                         return;
@@ -4083,7 +4139,21 @@ const handleEventDrop = async (targetDate: Date) => {
                               minute: "2-digit",
                             })}
                             {event.calendarSummary ? ` · ${event.calendarSummary}` : ""}
-                          </span>
+                        </span>
+                          <span
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                              setResizingEvent({ id: event.id, edge: "start" });
+                            }}
+                            style={calendarEventResizeTopStyle}
+                          />
+                          <span
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                              setResizingEvent({ id: event.id, edge: "end" });
+                            }}
+                            style={calendarEventResizeBottomStyle}
+                          />
                         </button>
                       );
                     })}
@@ -5519,6 +5589,26 @@ const calendarEventTimeStyle = {
   fontSize: "11px",
   fontWeight: "400",
   color: "#1967D2",
+};
+
+const calendarEventResizeHandleBaseStyle = {
+  position: "absolute" as const,
+  left: "10px",
+  right: "10px",
+  height: "6px",
+  borderRadius: "999px",
+  background: "rgba(255,255,255,0.55)",
+  cursor: "ns-resize",
+};
+
+const calendarEventResizeTopStyle = {
+  ...calendarEventResizeHandleBaseStyle,
+  top: "3px",
+};
+
+const calendarEventResizeBottomStyle = {
+  ...calendarEventResizeHandleBaseStyle,
+  bottom: "3px",
 };
 
 const twoColumnStyle = {
