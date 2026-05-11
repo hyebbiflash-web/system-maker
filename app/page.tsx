@@ -139,6 +139,7 @@ type TrashItem = {
 };
 
 const plannerAreas: Area[] = ["일", "관리", "일상"];
+const PROJECTS_STORAGE_KEY = "system-maker-projects-v1";
 
 const linkedRecordDescriptions: Record<Area, string> = {
   일: "플래너의 일 영역과 연결된 업무 기록 공간",
@@ -1559,7 +1560,7 @@ function ProjectPage({
       };
     });
 
-  const [projects, setProjects] = useState<Project[]>(() => [
+  const createDefaultProjects = (): Project[] => [
     {
       id: 1,
       title: "System Maker 개발",
@@ -1614,7 +1615,27 @@ function ProjectPage({
       participants: [],
       todos: makeProjectTodos(["업체 비교", "예산표 정리", "촬영 준비물 체크"]),
     },
-  ]);
+  ];
+  const [projects, setProjects] = useState<Project[]>(() => {
+    if (typeof window === "undefined") return createDefaultProjects();
+
+    const savedProjects = window.localStorage.getItem(PROJECTS_STORAGE_KEY);
+    if (!savedProjects) return createDefaultProjects();
+
+    try {
+      const parsedProjects = JSON.parse(savedProjects) as Project[];
+      if (!Array.isArray(parsedProjects)) return createDefaultProjects();
+
+      return parsedProjects.map((project) => ({
+        ...project,
+        ownerEmail: project.ownerEmail || currentOwner,
+        participants: project.participants || [],
+        todos: project.todos || [],
+      }));
+    } catch {
+      return createDefaultProjects();
+    }
+  });
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<number | null>(null);
   const [projectTitle, setProjectTitle] = useState("");
@@ -1774,8 +1795,15 @@ function ProjectPage({
   };
 
   const updateProject = (projectId: number, updater: (project: Project) => Project) => {
-    setProjects(projects.map((project) => (project.id === projectId ? updater(project) : project)));
+    setProjects((currentProjects) =>
+      currentProjects.map((project) => (project.id === projectId ? updater(project) : project))
+    );
   };
+
+  useEffect(() => {
+    window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
+  }, [projects]);
+
   const addDraftParticipant = () => {
     const email = projectInviteEmail.trim();
     if (!email || !email.includes("@") || projectDraftParticipants.some((item) => item.email === email)) return;
@@ -1848,10 +1876,10 @@ function ProjectPage({
       participants: projectDraftParticipants,
     };
 
-    setProjects(
+    setProjects((currentProjects) =>
       editingProjectId
-        ? projects.map((project) => (project.id === editingProjectId ? newProject : project))
-        : [...projects, newProject]
+        ? currentProjects.map((project) => (project.id === editingProjectId ? newProject : project))
+        : [...currentProjects, newProject]
     );
     if (!editingProjectId) {
       onCreatePlannerTodo({
@@ -1896,7 +1924,7 @@ function ProjectPage({
     const targetProject = projects.find((project) => project.id === projectId);
     if (!targetProject || !window.confirm("정말 삭제하시겠습니까?")) return;
 
-    setProjects(projects.filter((project) => project.id !== projectId));
+    setProjects((currentProjects) => currentProjects.filter((project) => project.id !== projectId));
     setSelectedProjectId(null);
     onTrashItem({
       section: "프로젝트 센터",
