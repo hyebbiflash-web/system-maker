@@ -1658,6 +1658,7 @@ function ProjectPage({
   const [newDraftChildDueDates, setNewDraftChildDueDates] = useState<Record<number, string>>({});
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [rootTodoInputOpen, setRootTodoInputOpen] = useState<Record<number, boolean>>({});
+  const [draggedProjectTodoId, setDraggedProjectTodoId] = useState<number | null>(null);
   const [participantSettingsProjectId, setParticipantSettingsProjectId] = useState<number | null>(null);
   const [projectSubAreaOptions, setProjectSubAreaOptions] = useState<Record<Area, string[]>>({
     일: ["본업", "사이드"],
@@ -1703,6 +1704,67 @@ function ProjectPage({
     todos
       .filter((todo) => todo.id !== todoId)
       .map((todo) => ({ ...todo, children: deleteTodoFromTree(todo.children, todoId) }));
+  const extractTodoFromTree = (
+    todos: ProjectTodo[],
+    todoId: number
+  ): { todos: ProjectTodo[]; extracted?: ProjectTodo } => {
+    let extracted: ProjectTodo | undefined;
+    const nextTodos: ProjectTodo[] = [];
+
+    todos.forEach((todo) => {
+      if (todo.id === todoId) {
+        extracted = todo;
+        return;
+      }
+
+      const childResult = extractTodoFromTree(todo.children, todoId);
+      if (childResult.extracted) extracted = childResult.extracted;
+      nextTodos.push({ ...todo, children: childResult.todos });
+    });
+
+    return { todos: nextTodos, extracted };
+  };
+  const insertTodoBefore = (
+    todos: ProjectTodo[],
+    targetTodoId: number,
+    item: ProjectTodo
+  ): { todos: ProjectTodo[]; inserted: boolean } => {
+    const nextTodos: ProjectTodo[] = [];
+    let inserted = false;
+
+    todos.forEach((todo) => {
+      if (todo.id === targetTodoId) {
+        nextTodos.push(item);
+        inserted = true;
+      }
+
+      if (!inserted) {
+        const childResult = insertTodoBefore(todo.children, targetTodoId, item);
+        if (childResult.inserted) {
+          inserted = true;
+          nextTodos.push({ ...todo, children: childResult.todos });
+          return;
+        }
+      }
+
+      nextTodos.push(todo);
+    });
+
+    return { todos: nextTodos, inserted };
+  };
+  const moveProjectTodo = (projectId: number, draggedTodoId: number, targetTodoId: number) => {
+    if (draggedTodoId === targetTodoId) return;
+
+    updateProject(projectId, (project) => {
+      const extractedResult = extractTodoFromTree(project.todos, draggedTodoId);
+      if (!extractedResult.extracted) return project;
+
+      const insertResult = insertTodoBefore(extractedResult.todos, targetTodoId, extractedResult.extracted);
+      if (!insertResult.inserted) return project;
+
+      return { ...project, todos: insertResult.todos };
+    });
+  };
   const findProjectTodo = (todos: ProjectTodo[], todoId: number): ProjectTodo | undefined => {
     for (const todo of todos) {
       if (todo.id === todoId) return todo;
@@ -2240,6 +2302,13 @@ function ProjectPage({
                   depth={0}
                   onUpdate={(todoId, updater) => updateProjectTodo(selectedProject.id, todoId, updater)}
                   onDelete={(todoId) => deleteProjectTodo(selectedProject.id, todoId)}
+                  draggingTodoId={draggedProjectTodoId}
+                  onDragStartTodo={(todoId) => setDraggedProjectTodoId(todoId)}
+                  onDragEndTodo={() => setDraggedProjectTodoId(null)}
+                  onDropTodo={(targetTodoId) => {
+                    if (draggedProjectTodoId) moveProjectTodo(selectedProject.id, draggedProjectTodoId, targetTodoId);
+                    setDraggedProjectTodoId(null);
+                  }}
                   onDueDateChange={(todoId, dueDate) => {
                     const targetTodo = findProjectTodo(selectedProject.todos, todoId);
                     updateProjectTodo(selectedProject.id, todoId, (todo) => ({ ...todo, dueDate }));
@@ -2576,6 +2645,10 @@ function ProjectPage({
                   onDueDateChange={(todoId, dueDate) =>
                     setProjectDraftTodos(updateTodoTree(projectDraftTodos, todoId, (todo) => ({ ...todo, dueDate })))
                   }
+                  draggingTodoId={null}
+                  onDragStartTodo={() => undefined}
+                  onDragEndTodo={() => undefined}
+                  onDropTodo={() => undefined}
                   getNewChildTitle={(todoId) => newDraftChildTitles[todoId] || ""}
                   setNewChildTitle={(todoId, value) =>
                     setNewDraftChildTitles({ ...newDraftChildTitles, [todoId]: value })
@@ -2659,6 +2732,10 @@ function ProjectTodoItem({
   onUpdate,
   onDelete,
   onDueDateChange,
+  draggingTodoId,
+  onDragStartTodo,
+  onDragEndTodo,
+  onDropTodo,
   getNewChildTitle,
   setNewChildTitle,
   getNewChildDueDate,
@@ -2670,6 +2747,10 @@ function ProjectTodoItem({
   onUpdate: (todoId: number, updater: (todo: ProjectTodo) => ProjectTodo) => void;
   onDelete: (todoId: number) => void;
   onDueDateChange: (todoId: number, dueDate: string) => void;
+  draggingTodoId: number | null;
+  onDragStartTodo: (todoId: number) => void;
+  onDragEndTodo: () => void;
+  onDropTodo: (todoId: number) => void;
   getNewChildTitle: (todoId: number) => string;
   setNewChildTitle: (todoId: number, value: string) => void;
   getNewChildDueDate: (todoId: number) => string;
@@ -2689,18 +2770,40 @@ function ProjectTodoItem({
 
   return (
     <div
+      onDragOver={(event) => {
+        if (draggingTodoId && draggingTodoId !== todo.id) event.preventDefault();
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        onDropTodo(todo.id);
+      }}
       style={{
         ...projectTodoBoxStyle,
         ...(depth > 0 ? projectSubTodoBoxStyle : {}),
+        ...(draggingTodoId === todo.id ? projectTodoDraggingStyle : {}),
       }}
     >
       <div
         style={{
           ...projectTodoRowStyle,
-          gridTemplateColumns: depth > 0 ? "20px 30px 30px 22px minmax(0, 1fr) 132px 52px" : "30px 30px 22px minmax(0, 1fr) 132px 52px",
+          gridTemplateColumns: depth > 0 ? "20px 30px 30px 30px 22px minmax(0, 1fr) 132px 52px" : "30px 30px 30px 22px minmax(0, 1fr) 132px 52px",
         }}
       >
         {depth > 0 && <div style={projectSubTodoMarkerStyle}>ㄴ</div>}
+        <button
+          draggable
+          onDragStart={(event) => {
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", String(todo.id));
+            onDragStartTodo(todo.id);
+          }}
+          onDragEnd={onDragEndTodo}
+          onMouseDown={(event) => event.currentTarget.focus()}
+          style={projectTodoDragHandleStyle}
+          title="꾹 눌러 순서 이동"
+        >
+          ⋮⋮
+        </button>
         <button
           onClick={() => setIsCollapsed(!isCollapsed)}
           style={{
@@ -2757,6 +2860,10 @@ function ProjectTodoItem({
             onUpdate={onUpdate}
             onDelete={onDelete}
             onDueDateChange={onDueDateChange}
+            draggingTodoId={draggingTodoId}
+            onDragStartTodo={onDragStartTodo}
+            onDragEndTodo={onDragEndTodo}
+            onDropTodo={onDropTodo}
             getNewChildTitle={getNewChildTitle}
             setNewChildTitle={setNewChildTitle}
             getNewChildDueDate={getNewChildDueDate}
@@ -6259,7 +6366,30 @@ function ProgressBarInput({ value, onChange }: { value: number; onChange: (value
         style={{ flex: 1, accentColor: "#B40023", cursor: "pointer" }}
       />
 
-      <div style={progressValueStyle}>{value}%</div>
+      <div style={progressValueStyle}>
+        <input
+          type="number"
+          min="0"
+          max="100"
+          value={value}
+          onChange={(e) => onChange(Math.min(100, Math.max(0, Number(e.target.value) || 0)))}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          }}
+          style={{
+            width: "36px",
+            background: "transparent",
+            border: "none",
+            outline: "none",
+            fontWeight: "bold",
+            color: "#B40023",
+            fontSize: "14px",
+            textAlign: "center",
+            padding: 0,
+          }}
+        />
+        <span style={{ fontWeight: "bold", color: "#B40023", fontSize: "14px" }}>%</span>
+      </div>
     </div>
   );
 }
@@ -7091,6 +7221,20 @@ const projectTodoCollapseButtonStyle = {
   transition: "transform 120ms ease",
 };
 
+const projectTodoDragHandleStyle = {
+  ...projectTodoCollapseButtonStyle,
+  cursor: "grab",
+  color: "#6B7280",
+  letterSpacing: "-3px",
+  paddingRight: "3px",
+};
+
+const projectTodoDraggingStyle = {
+  opacity: 0.45,
+  borderColor: "#B40023",
+  background: "#FFF7F8",
+};
+
 const subTodoListStyle = {
   marginTop: "10px",
   marginLeft: "30px",
@@ -7527,16 +7671,14 @@ const deleteButtonStyle = {
 };
 
 const progressValueStyle = {
-  width: "52px",
+  width: "62px",
   height: "36px",
   borderRadius: "12px",
   background: "#f7f8fa",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  fontWeight: "bold",
-  color: "#B40023",
-  fontSize: "14px",
+  gap: "0px",
 };
 
 const redButtonFull = {
