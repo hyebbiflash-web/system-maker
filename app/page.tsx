@@ -22,6 +22,7 @@ type Todo = {
   urgency: number;
   progress: number;
   dueDate: string;
+  dueTime?: string;
   done: boolean;
   googleTaskId?: string;
 };
@@ -59,6 +60,7 @@ type ProjectTodo = {
   id: number;
   title: string;
   dueDate?: string;
+  dueTime?: string;
   done: boolean;
   children: ProjectTodo[];
 };
@@ -66,6 +68,7 @@ type ProjectTodo = {
 type ProjectTodoSeed = string | {
   title: string;
   dueDate?: string;
+  dueTime?: string;
   children?: ProjectTodoSeed[];
 };
 
@@ -140,6 +143,43 @@ type TrashItem = {
 
 const plannerAreas: Area[] = ["일", "관리", "일상"];
 const PROJECTS_STORAGE_KEY = "system-maker-projects-v1";
+const notificationSoundOptions = [
+  { value: "soft", label: "맑은 톤" },
+  { value: "click", label: "짧은 클릭" },
+  { value: "chime", label: "가벼운 차임" },
+  { value: "pop", label: "작은 팝" },
+  { value: "none", label: "소리 없음" },
+];
+
+const playNotificationSound = (sound: string) => {
+  if (sound === "none" || typeof window === "undefined") return;
+
+  const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextClass) return;
+
+  const context = new AudioContextClass();
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  const now = context.currentTime;
+  const soundMap: Record<string, { frequency: number; type: OscillatorType; duration: number }> = {
+    soft: { frequency: 660, type: "sine", duration: 0.16 },
+    click: { frequency: 520, type: "triangle", duration: 0.08 },
+    chime: { frequency: 880, type: "sine", duration: 0.22 },
+    pop: { frequency: 740, type: "square", duration: 0.1 },
+  };
+  const tone = soundMap[sound] || soundMap.soft;
+
+  oscillator.type = tone.type;
+  oscillator.frequency.setValueAtTime(tone.frequency, now);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.12, now + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + tone.duration);
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+  oscillator.start(now);
+  oscillator.stop(now + tone.duration + 0.02);
+  window.setTimeout(() => void context.close().catch(() => undefined), (tone.duration + 0.08) * 1000);
+};
 
 const linkedRecordDescriptions: Record<Area, string> = {
   일: "플래너의 일 영역과 연결된 업무 기록 공간",
@@ -286,6 +326,7 @@ export default function Home() {
   const [subArea, setSubArea] = useState("본업");
   const [newSubArea, setNewSubArea] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [dueTime, setDueTime] = useState("");
   const [progress, setProgress] = useState(0);
   const [importance, setImportance] = useState(0);
   const [urgency, setUrgency] = useState(0);
@@ -300,6 +341,8 @@ export default function Home() {
   const [plannerNotificationColor, setPlannerNotificationColor] = useState("#B40023");
   const [plannerNotificationSound, setPlannerNotificationSound] = useState("soft");
   const [plannerNotificationVibration, setPlannerNotificationVibration] = useState(true);
+  const [plannerNotificationPopupEnabled, setPlannerNotificationPopupEnabled] = useState(true);
+  const [plannerNotificationPopup, setPlannerNotificationPopup] = useState("");
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
   const [scheduleTitle, setScheduleTitle] = useState("");
   const [scheduleStart, setScheduleStart] = useState("");
@@ -361,6 +404,25 @@ export default function Home() {
     ...weekDays,
   ];
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      const upcomingTodo = todos.find((todo) => {
+        if (!todo.dueDate || !todo.dueTime || todo.done) return false;
+        const diff = new Date(`${todo.dueDate}T${todo.dueTime}:00`).getTime() - now;
+        return diff > 0 && diff < 10 * 60 * 1000;
+      });
+      if (!upcomingTodo) return;
+
+      const message = `${upcomingTodo.title} 할 일이 곧 마감돼요.`;
+      if (plannerNotificationPopupEnabled) setPlannerNotificationPopup(message);
+      if (plannerNotificationVibration && navigator.vibrate) navigator.vibrate(120);
+      playNotificationSound(plannerNotificationSound);
+    }, 60000);
+
+    return () => window.clearInterval(timer);
+  }, [todos, plannerNotificationPopupEnabled, plannerNotificationSound, plannerNotificationVibration]);
+
   const goPrevWeek = () => {
     const newDate = new Date(currentDate);
     newDate.setDate(currentDate.getDate() - 7);
@@ -404,6 +466,7 @@ export default function Home() {
       const dd = String(selectedDate.getDate()).padStart(2, "0");
       setDueDate(`${yyyy}-${mm}-${dd}`);
     }
+    setDueTime("");
 
     setProgress(0);
     setImportance(0);
@@ -417,6 +480,7 @@ export default function Home() {
     setArea(todo.area);
     setSubArea(todo.subArea);
     setDueDate(todo.dueDate);
+    setDueTime(todo.dueTime || "");
     setProgress(todo.progress);
     setImportance(todo.importance);
     setUrgency(todo.urgency);
@@ -542,6 +606,7 @@ export default function Home() {
         urgency,
         progress,
         dueDate,
+        dueTime,
       });
       setTodos(todos.map((todo) => (todo.id === editingTodoId ? updatedTodo : todo)));
     } else {
@@ -555,6 +620,7 @@ export default function Home() {
         urgency,
         progress,
         dueDate,
+        dueTime,
         done: false,
       });
       setTodos([...todos, newTodo]);
@@ -563,6 +629,7 @@ export default function Home() {
     setTitle("");
     setArea("일");
     setSubArea("본업");
+    setDueTime("");
     setDueDate("");
     setProgress(0);
     setImportance(0);
@@ -768,6 +835,7 @@ export default function Home() {
     area,
     subArea,
     dueDate,
+    dueTime,
     urgency,
     importance,
     progress,
@@ -776,6 +844,7 @@ export default function Home() {
     area: Area;
     subArea: string;
     dueDate: string;
+    dueTime?: string;
     urgency: number;
     importance: number;
     progress: number;
@@ -792,13 +861,14 @@ export default function Home() {
       urgency,
       progress,
       dueDate,
+      dueTime,
       done: false,
     };
 
     const syncedTodo = await syncTodoToGoogleTask(newTodo);
     setTodos((currentTodos) => [...currentTodos, syncedTodo]);
 
-    const projectTodoStart = new Date(`${dueDate}T09:00:00`);
+    const projectTodoStart = new Date(`${dueDate}T${dueTime || "09:00"}:00`);
     const projectTodoEnd = new Date(projectTodoStart.getTime() + 30 * 60 * 1000);
     setCalendarEvents((currentEvents) => [
       ...currentEvents,
@@ -1017,8 +1087,8 @@ if (!user) {
                 >
                   + 할 일 추가
                 </button>
-                <button onClick={() => setIsPlannerSettingsOpen(true)} style={weekButtonStyle} title="알림 설정">
-                  ⚙
+                <button onClick={() => setIsPlannerSettingsOpen(true)} style={settingsIconButtonStyle} title="알림 설정">
+                  <Settings size={24} strokeWidth={2.4} />
                 </button>
 
                 <button onClick={goPrevWeek} style={weekButtonStyle}>
@@ -1181,12 +1251,21 @@ if (!user) {
 
               <div>
                 <FormLabel title="마감일" />
-                <input
-                  type="date"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                  style={inputStyle}
-                />
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: "8px" }}>
+                  <input
+                    type="date"
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                    style={inputStyle}
+                  />
+                  <input
+                    type="time"
+                    value={dueTime}
+                    onChange={(e) => setDueTime(e.target.value)}
+                    style={inputStyle}
+                    title="마감시간"
+                  />
+                </div>
               </div>
             </div>
 
@@ -1449,10 +1528,19 @@ if (!user) {
           color={plannerNotificationColor}
           sound={plannerNotificationSound}
           vibration={plannerNotificationVibration}
+          popupEnabled={plannerNotificationPopupEnabled}
           onColorChange={setPlannerNotificationColor}
           onSoundChange={setPlannerNotificationSound}
           onVibrationChange={setPlannerNotificationVibration}
+          onPopupEnabledChange={setPlannerNotificationPopupEnabled}
           onClose={() => setIsPlannerSettingsOpen(false)}
+        />
+      )}
+      {plannerNotificationPopup && (
+        <NotificationPopup
+          message={plannerNotificationPopup}
+          color={plannerNotificationColor}
+          onClose={() => setPlannerNotificationPopup("")}
         />
       )}
       <nav style={mobileTabDockStyle}
@@ -1491,17 +1579,21 @@ function NotificationSettingsModal({
   color,
   sound,
   vibration,
+  popupEnabled,
   onColorChange,
   onSoundChange,
   onVibrationChange,
+  onPopupEnabledChange,
   onClose,
 }: {
   color: string;
   sound: string;
   vibration: boolean;
+  popupEnabled: boolean;
   onColorChange: (value: string) => void;
   onSoundChange: (value: string) => void;
   onVibrationChange: (value: boolean) => void;
+  onPopupEnabledChange: (value: boolean) => void;
   onClose: () => void;
 }) {
   return (
@@ -1511,15 +1603,36 @@ function NotificationSettingsModal({
           <h2 style={{ margin: 0, fontSize: "24px", fontWeight: "800" }}>알림 설정</h2>
           <button onClick={onClose} style={closeButtonStyle}>×</button>
         </div>
-        <FormLabel title="소리" />
-        <select value={sound} onChange={(e) => onSoundChange(e.target.value)} style={selectStyle}>
-          <option value="soft">부드러운 소리</option>
-          <option value="none">소리 없음</option>
-        </select>
+        <FormLabel title="알림소리" />
+        <div style={{ display: "grid", gap: "8px" }}>
+          {notificationSoundOptions.map((option) => (
+            <button
+              key={option.value}
+              onClick={() => {
+                onSoundChange(option.value);
+                playNotificationSound(option.value);
+              }}
+              style={{
+                ...notificationOptionButtonStyle,
+                ...(sound === option.value ? notificationOptionButtonActiveStyle : {}),
+              }}
+            >
+              <span>{option.label}</span>
+              <span style={{ fontSize: "12px", color: sound === option.value ? "#B40023" : "#8A8178" }}>
+                {option.value === "none" ? "무음" : "듣기"}
+              </span>
+            </button>
+          ))}
+        </div>
         <FormLabel title="진동" />
         <label style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px" }}>
           <input type="checkbox" checked={vibration} onChange={(e) => onVibrationChange(e.target.checked)} />
           알림 시 진동 사용
+        </label>
+        <FormLabel title="알림 팝업창" />
+        <label style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px" }}>
+          <input type="checkbox" checked={popupEnabled} onChange={(e) => onPopupEnabledChange(e.target.checked)} />
+          알림 시간에 안내 팝업창 띄우기
         </label>
         <FormLabel title="알림창 색" />
         <input type="color" value={color} onChange={(e) => onColorChange(e.target.value)} style={{ ...inputStyle, height: "44px" }} />
@@ -1527,6 +1640,29 @@ function NotificationSettingsModal({
     </div>
   );
 }
+
+function NotificationPopup({
+  message,
+  color,
+  onClose,
+}: {
+  message: string;
+  color: string;
+  onClose: () => void;
+}) {
+  return (
+    <div style={notificationPopupBackdropStyle}>
+      <div style={{ ...notificationPopupBoxStyle, borderTop: `5px solid ${color}` }}>
+        <strong style={{ color: "#191F28", fontSize: "18px" }}>알림</strong>
+        <p style={{ color: "#4E5968", margin: "10px 0 18px", lineHeight: 1.5 }}>{message}</p>
+        <button onClick={onClose} style={{ ...redButtonFull, marginTop: 0 }}>
+          확인
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ProjectPage({
   userEmail,
   onCreatePlannerTodo,
@@ -1538,6 +1674,7 @@ function ProjectPage({
     area: Area;
     subArea: string;
     dueDate: string;
+    dueTime?: string;
     urgency: number;
     importance: number;
     progress: number;
@@ -1549,12 +1686,14 @@ function ProjectPage({
     items.map((item, index) => {
       const title = typeof item === "string" ? item : item.title;
       const dueDate = typeof item === "string" ? "" : item.dueDate || "";
+      const dueTime = typeof item === "string" ? "" : item.dueTime || "";
       const children = typeof item === "string" ? [] : item.children || [];
 
       return {
         id: createProjectTodoId() + index,
         title,
         dueDate,
+        dueTime,
         done: false,
         children: makeProjectTodos(children),
       };
@@ -1655,12 +1794,16 @@ function ProjectPage({
   const [projectDraftTodos, setProjectDraftTodos] = useState<ProjectTodo[]>([]);
   const [newTodoTitles, setNewTodoTitles] = useState<Record<number, string>>({});
   const [newTodoDueDates, setNewTodoDueDates] = useState<Record<number, string>>({});
+  const [newTodoDueTimes, setNewTodoDueTimes] = useState<Record<number, string>>({});
   const [newChildTodoTitles, setNewChildTodoTitles] = useState<Record<string, string>>({});
   const [newChildTodoDueDates, setNewChildTodoDueDates] = useState<Record<string, string>>({});
+  const [newChildTodoDueTimes, setNewChildTodoDueTimes] = useState<Record<string, string>>({});
   const [newDraftTodoTitle, setNewDraftTodoTitle] = useState("");
   const [newDraftTodoDueDate, setNewDraftTodoDueDate] = useState("");
+  const [newDraftTodoDueTime, setNewDraftTodoDueTime] = useState("");
   const [newDraftChildTitles, setNewDraftChildTitles] = useState<Record<number, string>>({});
   const [newDraftChildDueDates, setNewDraftChildDueDates] = useState<Record<number, string>>({});
+  const [newDraftChildDueTimes, setNewDraftChildDueTimes] = useState<Record<number, string>>({});
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [rootTodoInputOpen, setRootTodoInputOpen] = useState<Record<number, boolean>>({});
   const [draggedProjectTodoId, setDraggedProjectTodoId] = useState<number | null>(null);
@@ -1788,6 +1931,7 @@ function ProjectPage({
       area: project.area,
       subArea: project.subArea,
       dueDate,
+      dueTime: todo.dueTime,
       urgency: project.urgency,
       importance: project.importance,
       progress: 0,
@@ -1887,6 +2031,7 @@ function ProjectPage({
         area: newProject.area,
         subArea: newProject.subArea,
         dueDate: newProject.dueDate,
+        dueTime: "09:00",
         urgency: newProject.urgency,
         importance: newProject.importance,
         progress: newProject.progress,
@@ -1914,8 +2059,10 @@ function ProjectPage({
     setProjectDraftTodos([]);
     setNewDraftTodoTitle("");
     setNewDraftTodoDueDate("");
+    setNewDraftTodoDueTime("");
     setNewDraftChildTitles({});
     setNewDraftChildDueDates({});
+    setNewDraftChildDueTimes({});
     setEditingProjectId(null);
     setIsProjectModalOpen(false);
   };
@@ -1945,9 +2092,10 @@ function ProjectPage({
   const addProjectTodo = (projectId: number) => {
     const title = (newTodoTitles[projectId] || "").trim();
     const dueDate = newTodoDueDates[projectId] || "";
+    const dueTime = newTodoDueTimes[projectId] || "";
     if (!title) return;
     const sourceProject = projects.find((project) => project.id === projectId);
-    const nextTodo = { id: createProjectTodoId(), title, dueDate, done: false, children: [] };
+    const nextTodo = { id: createProjectTodoId(), title, dueDate, dueTime, done: false, children: [] };
 
     updateProject(projectId, (project) => ({
       ...project,
@@ -1958,6 +2106,7 @@ function ProjectPage({
     }
     setNewTodoTitles({ ...newTodoTitles, [projectId]: "" });
     setNewTodoDueDates({ ...newTodoDueDates, [projectId]: "" });
+    setNewTodoDueTimes({ ...newTodoDueTimes, [projectId]: "" });
     setRootTodoInputOpen({ ...rootTodoInputOpen, [projectId]: false });
   };
 
@@ -2019,9 +2168,10 @@ function ProjectPage({
     const key = `${projectId}-${todoId}`;
     const title = (newChildTodoTitles[key] || "").trim();
     const dueDate = newChildTodoDueDates[key] || "";
+    const dueTime = newChildTodoDueTimes[key] || "";
     if (!title) return;
     const sourceProject = projects.find((project) => project.id === projectId);
-    const nextTodo = { id: createProjectTodoId(), title, dueDate, done: false, children: [] };
+    const nextTodo = { id: createProjectTodoId(), title, dueDate, dueTime, done: false, children: [] };
 
     updateProjectTodo(projectId, todoId, (todo) => ({
       ...todo,
@@ -2030,6 +2180,7 @@ function ProjectPage({
     if (sourceProject) syncProjectTodoToPlanner(sourceProject, nextTodo, dueDate);
     setNewChildTodoTitles({ ...newChildTodoTitles, [key]: "" });
     setNewChildTodoDueDates({ ...newChildTodoDueDates, [key]: "" });
+    setNewChildTodoDueTimes({ ...newChildTodoDueTimes, [key]: "" });
   };
 
   const addDraftTodo = () => {
@@ -2038,25 +2189,28 @@ function ProjectPage({
 
     setProjectDraftTodos([
       ...projectDraftTodos,
-      { id: createProjectTodoId(), title, dueDate: newDraftTodoDueDate, done: false, children: [] },
+      { id: createProjectTodoId(), title, dueDate: newDraftTodoDueDate, dueTime: newDraftTodoDueTime, done: false, children: [] },
     ]);
     setNewDraftTodoTitle("");
     setNewDraftTodoDueDate("");
+    setNewDraftTodoDueTime("");
   };
 
   const addDraftChildTodo = (todoId: number) => {
     const title = (newDraftChildTitles[todoId] || "").trim();
     const dueDate = newDraftChildDueDates[todoId] || "";
+    const dueTime = newDraftChildDueTimes[todoId] || "";
     if (!title) return;
 
     setProjectDraftTodos(
       updateTodoTree(projectDraftTodos, todoId, (todo) => ({
         ...todo,
-        children: [...todo.children, { id: createProjectTodoId(), title, dueDate, done: false, children: [] }],
+        children: [...todo.children, { id: createProjectTodoId(), title, dueDate, dueTime, done: false, children: [] }],
       }))
     );
     setNewDraftChildTitles({ ...newDraftChildTitles, [todoId]: "" });
     setNewDraftChildDueDates({ ...newDraftChildDueDates, [todoId]: "" });
+    setNewDraftChildDueTimes({ ...newDraftChildDueTimes, [todoId]: "" });
   };
 
   if (selectedProject) {
@@ -2296,6 +2450,15 @@ function ProjectPage({
                   style={projectTodoDateInputStyle}
                   title="To do 마감일"
                 />
+                <input
+                  type="time"
+                  value={newTodoDueTimes[selectedProject.id] || ""}
+                  onChange={(e) =>
+                    setNewTodoDueTimes({ ...newTodoDueTimes, [selectedProject.id]: e.target.value })
+                  }
+                  style={projectTodoDateInputStyle}
+                  title="To do 마감시간"
+                />
 
                 <button onClick={() => addProjectTodo(selectedProject.id)} style={subButtonSmall}>
                   추가
@@ -2339,6 +2502,11 @@ function ProjectPage({
                     updateProjectTodo(selectedProject.id, todoId, (todo) => ({ ...todo, dueDate }));
                     if (targetTodo) syncProjectTodoToPlanner(selectedProject, { ...targetTodo, dueDate }, dueDate);
                   }}
+                  onDueTimeChange={(todoId, dueTime) => {
+                    const targetTodo = findProjectTodo(selectedProject.todos, todoId);
+                    updateProjectTodo(selectedProject.id, todoId, (todo) => ({ ...todo, dueTime }));
+                    if (targetTodo?.dueDate) syncProjectTodoToPlanner(selectedProject, { ...targetTodo, dueTime }, targetTodo.dueDate);
+                  }}
                 getNewChildTitle={(todoId) => newChildTodoTitles[`${selectedProject.id}-${todoId}`] || ""}
                 setNewChildTitle={(todoId, value) =>
                   setNewChildTodoTitles({
@@ -2350,6 +2518,13 @@ function ProjectPage({
                 setNewChildDueDate={(todoId, value) =>
                   setNewChildTodoDueDates({
                     ...newChildTodoDueDates,
+                    [`${selectedProject.id}-${todoId}`]: value,
+                  })
+                }
+                getNewChildDueTime={(todoId) => newChildTodoDueTimes[`${selectedProject.id}-${todoId}`] || ""}
+                setNewChildDueTime={(todoId, value) =>
+                  setNewChildTodoDueTimes({
+                    ...newChildTodoDueTimes,
                     [`${selectedProject.id}-${todoId}`]: value,
                   })
                 }
@@ -2670,6 +2845,9 @@ function ProjectPage({
                   onDueDateChange={(todoId, dueDate) =>
                     setProjectDraftTodos(updateTodoTree(projectDraftTodos, todoId, (todo) => ({ ...todo, dueDate })))
                   }
+                  onDueTimeChange={(todoId, dueTime) =>
+                    setProjectDraftTodos(updateTodoTree(projectDraftTodos, todoId, (todo) => ({ ...todo, dueTime })))
+                  }
                   draggingTodoId={null}
                   dragOverTodoId={null}
                   onDragStartTodo={() => undefined}
@@ -2684,6 +2862,10 @@ function ProjectPage({
                   getNewChildDueDate={(todoId) => newDraftChildDueDates[todoId] || ""}
                   setNewChildDueDate={(todoId, value) =>
                     setNewDraftChildDueDates({ ...newDraftChildDueDates, [todoId]: value })
+                  }
+                  getNewChildDueTime={(todoId) => newDraftChildDueTimes[todoId] || ""}
+                  setNewChildDueTime={(todoId, value) =>
+                    setNewDraftChildDueTimes({ ...newDraftChildDueTimes, [todoId]: value })
                   }
                   addChild={addDraftChildTodo}
                 />
@@ -2705,6 +2887,13 @@ function ProjectPage({
                   onChange={(e) => setNewDraftTodoDueDate(e.target.value)}
                   style={projectTodoDateInputStyle}
                   title="To do 마감일"
+                />
+                <input
+                  type="time"
+                  value={newDraftTodoDueTime}
+                  onChange={(e) => setNewDraftTodoDueTime(e.target.value)}
+                  style={projectTodoDateInputStyle}
+                  title="To do 마감시간"
                 />
 
                 <button onClick={addDraftTodo} style={subButtonSmall}>
@@ -2760,6 +2949,7 @@ function ProjectTodoItem({
   onUpdate,
   onDelete,
   onDueDateChange,
+  onDueTimeChange,
   draggingTodoId,
   dragOverTodoId,
   onDragStartTodo,
@@ -2771,6 +2961,8 @@ function ProjectTodoItem({
   setNewChildTitle,
   getNewChildDueDate,
   setNewChildDueDate,
+  getNewChildDueTime,
+  setNewChildDueTime,
   addChild,
 }: {
   todo: ProjectTodo;
@@ -2778,6 +2970,7 @@ function ProjectTodoItem({
   onUpdate: (todoId: number, updater: (todo: ProjectTodo) => ProjectTodo) => void;
   onDelete: (todoId: number) => void;
   onDueDateChange: (todoId: number, dueDate: string) => void;
+  onDueTimeChange: (todoId: number, dueTime: string) => void;
   draggingTodoId: number | null;
   dragOverTodoId: number | null;
   onDragStartTodo: (todoId: number) => void;
@@ -2789,12 +2982,15 @@ function ProjectTodoItem({
   setNewChildTitle: (todoId: number, value: string) => void;
   getNewChildDueDate: (todoId: number) => string;
   setNewChildDueDate: (todoId: number, value: string) => void;
+  getNewChildDueTime: (todoId: number) => string;
+  setNewChildDueTime: (todoId: number, value: string) => void;
   addChild: (todoId: number) => void;
 }) {
   const [isChildInputOpen, setIsChildInputOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const childTitle = getNewChildTitle(todo.id);
   const childDueDate = getNewChildDueDate(todo.id);
+  const childDueTime = getNewChildDueTime(todo.id);
   const isDragging = draggingTodoId === todo.id;
   const isDropTarget = Boolean(draggingTodoId && draggingTodoId !== todo.id && dragOverTodoId === todo.id);
   const submitChildTodo = () => {
@@ -2833,7 +3029,7 @@ function ProjectTodoItem({
       <div
         style={{
           ...projectTodoRowStyle,
-          gridTemplateColumns: depth > 0 ? "20px 30px 30px 30px 22px minmax(0, 1fr) 132px 52px" : "30px 30px 30px 22px minmax(0, 1fr) 132px 52px",
+          gridTemplateColumns: depth > 0 ? "20px 30px 30px 30px 22px minmax(0, 1fr) 132px 96px 52px" : "30px 30px 30px 22px minmax(0, 1fr) 132px 96px 52px",
         }}
       >
         {depth > 0 && <div style={projectSubTodoMarkerStyle}>ㄴ</div>}
@@ -2895,6 +3091,13 @@ function ProjectTodoItem({
           style={projectTodoDateInputStyle}
           title="마감일"
         />
+        <input
+          type="time"
+          value={todo.dueTime || ""}
+          onChange={(e) => onDueTimeChange(todo.id, e.target.value)}
+          style={projectTodoDateInputStyle}
+          title="마감시간"
+        />
 
         <button onClick={() => onDelete(todo.id)} style={smallDangerButtonStyle}>
           삭제
@@ -2910,6 +3113,7 @@ function ProjectTodoItem({
             onUpdate={onUpdate}
             onDelete={onDelete}
             onDueDateChange={onDueDateChange}
+            onDueTimeChange={onDueTimeChange}
             draggingTodoId={draggingTodoId}
             dragOverTodoId={dragOverTodoId}
             onDragStartTodo={onDragStartTodo}
@@ -2921,6 +3125,8 @@ function ProjectTodoItem({
             setNewChildTitle={setNewChildTitle}
             getNewChildDueDate={getNewChildDueDate}
             setNewChildDueDate={setNewChildDueDate}
+            getNewChildDueTime={getNewChildDueTime}
+            setNewChildDueTime={setNewChildDueTime}
             addChild={addChild}
           />
         ))}
@@ -2943,6 +3149,13 @@ function ProjectTodoItem({
               onChange={(e) => setNewChildDueDate(todo.id, e.target.value)}
               style={projectTodoDateInputStyle}
               title="하위 To do 마감일"
+            />
+            <input
+              type="time"
+              value={childDueTime}
+              onChange={(e) => setNewChildDueTime(todo.id, e.target.value)}
+              style={projectTodoDateInputStyle}
+              title="하위 To do 마감시간"
             />
 
             <button onClick={submitChildTodo} style={smallGhostButtonStyle}>
@@ -3909,8 +4122,10 @@ function CalendarPage({
   const [isCalendarSettingsOpen, setIsCalendarSettingsOpen] = useState(false);
   const [notificationSound, setNotificationSound] = useState("soft");
   const [notificationVibration, setNotificationVibration] = useState(true);
-  const [notificationColor, setNotificationColor] = useState("#1A73E8");
+  const [notificationColor, setNotificationColor] = useState("#B40023");
+  const [notificationPopupEnabled, setNotificationPopupEnabled] = useState(true);
   const [calendarToast, setCalendarToast] = useState("");
+  const [calendarNotificationPopup, setCalendarNotificationPopup] = useState("");
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [eventTitle, setEventTitle] = useState("");
   const [draggedEventId, setDraggedEventId] = useState<string | null>(null);
@@ -4245,16 +4460,14 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
       if (!soonEvent) return;
 
       setCalendarToast(`${soonEvent.summary || "일정"} 일정이 곧 시작돼요.`);
+      if (notificationPopupEnabled) setCalendarNotificationPopup(`${soonEvent.summary || "일정"} 일정이 곧 시작돼요.`);
       if (notificationVibration && navigator.vibrate) navigator.vibrate(120);
-      if (notificationSound !== "none") {
-        const audio = new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=");
-        void audio.play().catch(() => undefined);
-      }
+      playNotificationSound(notificationSound);
       window.setTimeout(() => setCalendarToast(""), 5000);
     }, 60000);
 
     return () => window.clearInterval(timer);
-  }, [events, eventNotificationAmount, eventNotificationUnit, notificationSound, notificationVibration]);
+  }, [events, eventNotificationAmount, eventNotificationUnit, notificationPopupEnabled, notificationSound, notificationVibration]);
 
   const colorIdByHex: Record<string, string> = {
     "#1A73E8": "9",
@@ -4392,6 +4605,7 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
         urgency: eventTodoUrgency,
         progress: 0,
         dueDate,
+        dueTime: getLocalTimeValue(eventStart),
         done: false,
       });
       setIsEventModalOpen(false);
@@ -4614,14 +4828,14 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
         const overlapIndex = overlappingEvents.findIndex((otherEvent) => getEventRenderKey(otherEvent) === getEventRenderKey(event));
         const overlapCount = Math.max(overlappingEvents.length, 1);
         const position = getEventPosition(event);
-        const gap = overlapCount > 1 ? 4 : 0;
+        const gap = overlapCount > 1 ? 6 : 4;
 
         layouts[getEventRenderKey(event)] = {
           ...position,
-          top: position.top + 2,
-          height: Math.max(position.height - 6, 28),
-          left: `calc(${(Math.max(overlapIndex, 0) / overlapCount) * 100}% + ${overlapCount > 1 ? gap : 6}px)`,
-          width: `calc(${100 / overlapCount}% - ${overlapCount > 1 ? gap * 2 : 12}px)`,
+          top: position.top + 4,
+          height: Math.max(position.height - 10, 24),
+          left: `calc(${(Math.max(overlapIndex, 0) / overlapCount) * 100}% + ${gap}px)`,
+          width: `calc(${100 / overlapCount}% - ${gap * 2}px)`,
           zIndex: 10 + index,
         };
         return layouts;
@@ -4677,8 +4891,8 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
             + 할 일 추가
           </button>
 
-          <button onClick={() => setIsCalendarSettingsOpen(true)} style={weekButtonStyle} title="알림 설정">
-            ⚙
+          <button onClick={() => setIsCalendarSettingsOpen(true)} style={settingsIconButtonStyle} title="알림 설정">
+            <Settings size={24} strokeWidth={2.4} />
           </button>
 
           <button onClick={goPrevWeek} style={weekButtonStyle}>
@@ -5055,10 +5269,19 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
           color={notificationColor}
           sound={notificationSound}
           vibration={notificationVibration}
+          popupEnabled={notificationPopupEnabled}
           onColorChange={setNotificationColor}
           onSoundChange={setNotificationSound}
           onVibrationChange={setNotificationVibration}
+          onPopupEnabledChange={setNotificationPopupEnabled}
           onClose={() => setIsCalendarSettingsOpen(false)}
+        />
+      )}
+      {calendarNotificationPopup && (
+        <NotificationPopup
+          message={calendarNotificationPopup}
+          color={notificationColor}
+          onClose={() => setCalendarNotificationPopup("")}
         />
       )}
 
@@ -6236,7 +6459,7 @@ function TodoListGroup({
               }}
             >
               [{todo.area} / {todo.subArea}] {todo.title}
-              {todo.dueDate && <span style={{ color: "#8A8178" }}> · {todo.dueDate}</span>}
+              {todo.dueDate && <span style={{ color: "#8A8178" }}> · {todo.dueDate}{todo.dueTime ? ` ${todo.dueTime}` : ""}</span>}
             </button>
           </div>
         ))
@@ -6305,7 +6528,7 @@ function TodoAreaGroups({
                         [{todo.subArea}] {todo.title}
                       </div>
                       <span style={{ fontSize: "11px", color: "#6B7280", whiteSpace: "nowrap" }}>
-                        긴{todo.urgency || 0} · 중{todo.importance || 0}
+                        긴{todo.urgency || 0} · 중{todo.importance || 0}{todo.dueTime ? ` · ${todo.dueTime}` : ""}
                       </span>
                     </div>
                   </button>
@@ -6463,6 +6686,45 @@ const sidebarStyle = {
   padding: "14px 10px",
   display: "flex" as const,
   flexDirection: "column" as const,
+};
+
+const notificationOptionButtonStyle = {
+  height: "42px",
+  borderRadius: "12px",
+  border: "1px solid #E8E1D8",
+  background: "#FFFCF8",
+  color: "#191F28",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  padding: "0 12px",
+  fontWeight: "800",
+  cursor: "pointer",
+};
+
+const notificationOptionButtonActiveStyle = {
+  border: "1px solid #F0BAC6",
+  background: "#FFF1F3",
+  color: "#B40023",
+};
+
+const notificationPopupBackdropStyle = {
+  position: "fixed" as const,
+  inset: 0,
+  zIndex: 1300,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "rgba(25,31,40,0.18)",
+  padding: "20px",
+};
+
+const notificationPopupBoxStyle = {
+  width: "min(380px, calc(100vw - 40px))",
+  borderRadius: "18px",
+  background: "#FFFFFF",
+  padding: "22px",
+  boxShadow: "0 22px 60px rgba(25,31,40,0.22)",
 };
 
 const mobileTabDockStyle = {
@@ -7151,7 +7413,7 @@ const projectRootTodoAddRowStyle = {
 
 const projectTodoInlineAddStyle = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) 132px 64px",
+  gridTemplateColumns: "minmax(0, 1fr) 132px 96px 64px",
   gap: "8px",
   background: "#FFFFFF",
   border: "1px solid #DDE5EE",
@@ -7373,7 +7635,7 @@ const subTodoListStyle = {
 
 const subTodoAddRowStyle = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) 132px 52px",
+  gridTemplateColumns: "minmax(0, 1fr) 132px 96px 52px",
   gap: "8px",
 };
 
@@ -7385,7 +7647,7 @@ const projectSubTodoInputStyle = {
 
 const projectTodoAddBoxStyle = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) 132px 72px",
+  gridTemplateColumns: "minmax(0, 1fr) 132px 96px 72px",
   gap: "8px",
   background: "#FFFCF8",
   border: "1px solid #E8E1D8",
@@ -7844,6 +8106,18 @@ const weekButtonStyle = {
   fontSize: "18px",
   fontWeight: "bold",
   cursor: "pointer",
+};
+
+const settingsIconButtonStyle = {
+  ...weekButtonStyle,
+  width: "48px",
+  height: "48px",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  color: "#B40023",
+  background: "#FFF7F8",
+  border: "1px solid #F0D5DB",
 };
 
 const todayButtonStyle = {
