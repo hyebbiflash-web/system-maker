@@ -23,6 +23,7 @@ type Todo = {
   progress: number;
   dueDate: string;
   done: boolean;
+  googleTaskId?: string;
 };
 
 type Memo = {
@@ -466,45 +467,78 @@ export default function Home() {
     if (subArea === target) setSubArea(nextList[0] || "");
   };
 
-  const saveTodo = () => {
+  const getSavedGoogleCalendarToken = () =>
+    window.sessionStorage.getItem("system-maker-google-calendar-token") ||
+    window.localStorage.getItem("system-maker-google-calendar-token") ||
+    "";
+
+  const syncTodoToGoogleTask = async (todo: Todo) => {
+    const token = getSavedGoogleCalendarToken();
+    if (!token) return todo;
+
+    const body = {
+      title: todo.title,
+      notes: `${todo.area} / ${todo.subArea}`,
+      due: todo.dueDate ? new Date(`${todo.dueDate}T00:00:00`).toISOString() : undefined,
+      status: todo.done ? "completed" : "needsAction",
+    };
+    const response = await fetch(
+      todo.googleTaskId
+        ? `https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/${encodeURIComponent(todo.googleTaskId)}`
+        : "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks",
+      {
+        method: todo.googleTaskId ? "PATCH" : "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      }
+    );
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      console.warn("Google Tasks sync skipped", data?.error?.message);
+      return todo;
+    }
+
+    return { ...todo, googleTaskId: data.id || todo.googleTaskId };
+  };
+
+  const saveTodo = async () => {
     if (!title.trim()) return;
 
     const finalCellKey = dueDate ? new Date(dueDate).toDateString() : "memo";
 
     if (editingTodoId) {
-      setTodos(
-        todos.map((todo) =>
-          todo.id === editingTodoId
-            ? {
-                ...todo,
-                title: title.trim(),
-                area,
-                subArea,
-                cellKey: finalCellKey,
-                importance,
-                urgency,
-                progress,
-                dueDate,
-              }
-            : todo
-        )
-      );
+      const targetTodo = todos.find((todo) => todo.id === editingTodoId);
+      if (!targetTodo) return;
+      const updatedTodo = await syncTodoToGoogleTask({
+        ...targetTodo,
+        title: title.trim(),
+        area,
+        subArea,
+        cellKey: finalCellKey,
+        importance,
+        urgency,
+        progress,
+        dueDate,
+      });
+      setTodos(todos.map((todo) => (todo.id === editingTodoId ? updatedTodo : todo)));
     } else {
-      setTodos([
-        ...todos,
-        {
-          id: Date.now(),
-          title: title.trim(),
-          area,
-          subArea,
-          cellKey: finalCellKey,
-          importance,
-          urgency,
-          progress,
-          dueDate,
-          done: false,
-        },
-      ]);
+      const newTodo = await syncTodoToGoogleTask({
+        id: Date.now(),
+        title: title.trim(),
+        area,
+        subArea,
+        cellKey: finalCellKey,
+        importance,
+        urgency,
+        progress,
+        dueDate,
+        done: false,
+      });
+      setTodos([...todos, newTodo]);
     }
 
     setTitle("");
@@ -548,11 +582,6 @@ export default function Home() {
     setMemoContent("");
     setIsMemoModalOpen(false);
   };
-
-  const getSavedGoogleCalendarToken = () =>
-    window.sessionStorage.getItem("system-maker-google-calendar-token") ||
-    window.localStorage.getItem("system-maker-google-calendar-token") ||
-    "";
 
   const savePlannerSchedule = async () => {
     if (!scheduleTitle.trim() || !scheduleStart || !scheduleEnd) return;
@@ -677,6 +706,10 @@ export default function Home() {
   };
 
   const toggleDone = (id: number) => {
+    const targetTodo = todos.find((todo) => todo.id === id);
+    if (targetTodo?.googleTaskId) {
+      void syncTodoToGoogleTask({ ...targetTodo, done: !targetTodo.done });
+    }
     setTodos(
       todos.map((todo) =>
         todo.id === id ? { ...todo, done: !todo.done } : todo
@@ -690,6 +723,10 @@ export default function Home() {
         todo.id === todoId ? { ...todo, cellKey: targetCellKey } : todo
       )
     );
+  };
+  const isHolidaySchedule = (event: GoogleCalendarEvent) => {
+    const text = `${event.summary || ""} ${event.calendarSummary || ""}`.toLowerCase();
+    return text.includes("공휴일") || text.includes("휴일") || text.includes("holiday");
   };
 
   const createPlannerTodoFromProject = ({
@@ -725,6 +762,54 @@ export default function Home() {
       },
     ]);
   };
+
+  useEffect(() => {
+    const token = getSavedGoogleCalendarToken();
+    if (!token) return;
+
+    const syncGoogleTasks = async () => {
+      try {
+        const response = await fetch("https://tasks.googleapis.com/tasks/v1/lists/@default/tasks?showCompleted=true&showHidden=false", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        const data = await response.json();
+        if (!response.ok) return;
+
+        const taskTodos: Todo[] = (data.items || []).map((task: { id: string; title?: string; notes?: string; due?: string; status?: string }, index: number) => {
+          const dueDate = task.due ? task.due.slice(0, 10) : "";
+          const [taskArea, taskSubArea] = (task.notes || "").split("/").map((item) => item.trim());
+          const parsedArea = plannerAreas.includes(taskArea as Area) ? (taskArea as Area) : "일";
+
+          return {
+            id: Number(`9${index}${String(task.id).replace(/\D/g, "").slice(0, 8)}`) || Date.now() + index,
+            title: task.title || "제목 없음",
+            area: parsedArea,
+            subArea: taskSubArea || subAreaOptions[parsedArea][0] || "",
+            cellKey: dueDate ? new Date(`${dueDate}T00:00`).toDateString() : "memo",
+            importance: 0,
+            urgency: 0,
+            progress: task.status === "completed" ? 100 : 0,
+            dueDate,
+            done: task.status === "completed",
+            googleTaskId: task.id,
+          };
+        });
+
+        setTodos((currentTodos) => [
+          ...currentTodos.filter((todo) => !todo.googleTaskId),
+          ...taskTodos,
+        ]);
+      } catch (error) {
+        console.warn("Google Tasks sync failed", error);
+      }
+    };
+
+    void syncGoogleTasks();
+    // Sync Google Tasks once after login/token restoration.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const undatedTodos = sortTodos(todos.filter((todo) => !todo.dueDate));
   const datedTodos = [...todos.filter((todo) => todo.dueDate)].sort((a, b) => {
@@ -769,7 +854,7 @@ if (!user) {
           />
 
           <MenuItem
-            title="프로젝트 센터"
+            title="프로젝트 센테"
             active={activePage === "project"}
             onClick={() => setActivePage("project")}
           />
@@ -863,6 +948,7 @@ if (!user) {
                       const bTime = new Date(b.start?.dateTime || b.start?.date || 0).getTime();
                       return aTime - bTime;
                     });
+                  const hasHoliday = cellSchedules.some(isHolidaySchedule);
 
                   return (
                     <div
@@ -884,9 +970,9 @@ if (!user) {
                           : "0 1px 4px rgba(15,23,42,0.05)",
                       }}
                     >
-                      <div style={{ textAlign: "center", color: "#8A8178", fontSize: "12px" }}>
+                      <div style={{ textAlign: "center", color: hasHoliday ? "#D32F2F" : "#8A8178", fontSize: "12px" }}>
                         {cell.date && <div>{cell.date}</div>}
-                        <div style={{ color: cell.isToday ? "#3182f6" : "#8A8178" }}>
+                        <div style={{ color: hasHoliday ? "#D32F2F" : cell.isToday ? "#3182f6" : "#8A8178" }}>
                           {cell.label}
                         </div>
                       </div>
@@ -1115,7 +1201,7 @@ if (!user) {
               placeholder="추가로 기억할 내용을 적어주세요."
             />
 
-            <button style={redButtonFull} onClick={saveTodo}>
+            <button style={redButtonFull} onClick={() => void saveTodo()}>
               {editingTodoId ? "수정하기" : "추가하기"}
             </button>
 
@@ -1801,43 +1887,29 @@ function ProjectPage({
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
             <div style={projectRootTodoAddRowStyle}>
               <button
-                onClick={() =>
-                  setRootTodoInputOpen({
-                    ...rootTodoInputOpen,
-                    [selectedProject.id]: !rootTodoInputOpen[selectedProject.id],
-                  })
-                }
+                onClick={() => addProjectTodo(selectedProject.id)}
                 style={projectTodoCollapseButtonStyle}
                 title="상위 To do 추가"
               >
                 +
               </button>
-              {rootTodoInputOpen[selectedProject.id] && (
-                <div style={projectTodoInlineAddStyle}>
-                  <input
-                    value={newTodoTitles[selectedProject.id] || ""}
-                    onChange={(e) =>
-                      setNewTodoTitles({ ...newTodoTitles, [selectedProject.id]: e.target.value })
-                    }
-                    onKeyDown={(e) => {
-                      if (shouldSubmitByEnter(e)) addProjectTodo(selectedProject.id);
-                    }}
-                    style={projectTodoInputStyle}
-                    placeholder="새 To do 추가"
-                    autoFocus
-                  />
+              <div style={projectTodoInlineAddStyle}>
+                <input
+                  value={newTodoTitles[selectedProject.id] || ""}
+                  onChange={(e) =>
+                    setNewTodoTitles({ ...newTodoTitles, [selectedProject.id]: e.target.value })
+                  }
+                  onKeyDown={(e) => {
+                    if (shouldSubmitByEnter(e)) addProjectTodo(selectedProject.id);
+                  }}
+                  style={projectTodoInputStyle}
+                  placeholder="새 To do 추가"
+                />
 
-                  <button
-                    onClick={() => {
-                      addProjectTodo(selectedProject.id);
-                      setRootTodoInputOpen({ ...rootTodoInputOpen, [selectedProject.id]: false });
-                    }}
-                    style={subButtonSmall}
-                  >
-                    추가
-                  </button>
-                </div>
-              )}
+                <button onClick={() => addProjectTodo(selectedProject.id)} style={subButtonSmall}>
+                  추가
+                </button>
+              </div>
             </div>
             {selectedProject.todos.length === 0 && (
               <div style={{ color: "#8A8178", fontSize: "14px" }}>
@@ -1883,7 +1955,7 @@ function ProjectPage({
       <div style={pageHeaderStyle}>
         <div>
           <h2 style={{ fontSize: "clamp(20px, 5vw, 36px)", fontWeight: "bold", marginBottom: "8px", whiteSpace: "nowrap" }}>
-            프로젝트 센터
+            프로젝트 센테
           </h2>
 
           <p style={{ color: "#8A8178", margin: 0 }}>
@@ -3439,6 +3511,12 @@ const handleEventDrop = async (targetDate: Date) => {
   const removeAttendee = (email: string) => {
     setEventAttendees(eventAttendees.filter((item) => item !== email));
   };
+  const getMeetLink = (event?: GoogleCalendarEvent | null) => {
+    const conference = event?.conferenceData as
+      | { entryPoints?: { entryPointType?: string; uri?: string }[]; conferenceId?: string }
+      | undefined;
+    return conference?.entryPoints?.find((entry) => entry.entryPointType === "video")?.uri || "";
+  };
 
   const openCreateEventModal = (date?: Date) => {
     const start = date ? new Date(date) : new Date(calendarDate);
@@ -4211,6 +4289,16 @@ const handleEventDrop = async (targetDate: Date) => {
                     >
                       {eventHasMeet ? "Google Meet 화상 회의 생성됨" : "Google Meet 화상 회의 추가"}
                     </button>
+                    {getMeetLink(editingEventId ? events.find((event) => event.id === editingEventId) : null) && (
+                      <a
+                        href={getMeetLink(editingEventId ? events.find((event) => event.id === editingEventId) : null)}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={googleMeetLinkStyle}
+                      >
+                        Meet 링크 열기
+                      </a>
+                    )}
                     <input
                       value={eventLocation}
                       onChange={(e) => setEventLocation(e.target.value)}
@@ -4675,6 +4763,16 @@ const googleMeetButtonStyle = {
 const googleMeetButtonActiveStyle = {
   color: "#0B57D0",
   fontWeight: "800",
+};
+
+const googleMeetLinkStyle = {
+  display: "inline-flex",
+  width: "fit-content",
+  color: "#0B57D0",
+  fontSize: "14px",
+  fontWeight: "800",
+  textDecoration: "none",
+  padding: "0 0 4px",
 };
 
 const googleWideFieldStyle = {
@@ -5784,7 +5882,7 @@ const projectTodoProgressHintStyle = {
 
 const projectRootTodoAddRowStyle = {
   display: "grid",
-  gridTemplateColumns: "30px minmax(0, 420px)",
+  gridTemplateColumns: "30px minmax(0, 1fr)",
   gap: "8px",
   alignItems: "center",
   minHeight: "36px",

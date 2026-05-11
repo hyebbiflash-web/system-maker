@@ -18,8 +18,10 @@ export const db = getFirestore(app);
 
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.addScope("https://www.googleapis.com/auth/calendar");
+googleProvider.addScope("https://www.googleapis.com/auth/tasks");
 googleProvider.setCustomParameters({ include_granted_scopes: "true" });
 
 export const calendarProvider = new GoogleAuthProvider();
 calendarProvider.addScope("https://www.googleapis.com/auth/calendar");
+calendarProvider.addScope("https://www.googleapis.com/auth/tasks");
 calendarProvider.setCustomParameters({ include_granted_scopes: "true" });
