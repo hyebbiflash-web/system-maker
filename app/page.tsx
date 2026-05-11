@@ -44,6 +44,15 @@ type Project = {
   status: string;
   memo: string;
   todos: ProjectTodo[];
+  ownerEmail: string;
+  participants: ProjectParticipant[];
+};
+
+type ProjectParticipant = {
+  email: string;
+  status: "pending" | "accepted" | "declined";
+  canEdit: boolean;
+  canDelete: boolean;
 };
 
 type ProjectTodo = {
@@ -105,6 +114,7 @@ type GoogleCalendarEvent = {
   guestsCanInviteOthers?: boolean;
   guestsCanSeeOtherGuests?: boolean;
   conferenceData?: unknown;
+  hangoutLink?: string;
 };
 
 type GoogleCalendarSource = {
@@ -259,6 +269,7 @@ export default function Home() {
       unsub();
     };
   }, []);
+
   const [activePage, setActivePage] = useState<"calendar" | "planner" | "project" | "record" | "trash">("calendar");
 
   const [isTodoModalOpen, setIsTodoModalOpen] = useState(false);
@@ -281,6 +292,10 @@ export default function Home() {
   const [memoContent, setMemoContent] = useState("");
   const [calendarEvents, setCalendarEvents] = useState<GoogleCalendarEvent[]>([]);
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+  const [isPlannerSettingsOpen, setIsPlannerSettingsOpen] = useState(false);
+  const [plannerNotificationColor, setPlannerNotificationColor] = useState("#B40023");
+  const [plannerNotificationSound, setPlannerNotificationSound] = useState("soft");
+  const [plannerNotificationVibration, setPlannerNotificationVibration] = useState(true);
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
   const [scheduleTitle, setScheduleTitle] = useState("");
   const [scheduleStart, setScheduleStart] = useState("");
@@ -734,6 +749,8 @@ export default function Home() {
     area,
     subArea,
     dueDate,
+    urgency,
+    importance,
     progress,
   }: {
     title: string;
@@ -759,6 +776,21 @@ export default function Home() {
         progress,
         dueDate,
         done: false,
+      },
+    ]);
+
+    const projectTodoStart = new Date(`${dueDate}T09:00:00`);
+    const projectTodoEnd = new Date(projectTodoStart.getTime() + 30 * 60 * 1000);
+    setCalendarEvents((currentEvents) => [
+      ...currentEvents,
+      {
+        id: `project-todo-${Date.now()}`,
+        summary: `[프로젝트] ${title}`,
+        description: `${area} / ${subArea}`,
+        calendarSummary: "프로젝트",
+        calendarColor: "#B40023",
+        start: { dateTime: projectTodoStart.toISOString() },
+        end: { dateTime: projectTodoEnd.toISOString() },
       },
     ]);
   };
@@ -882,6 +914,7 @@ if (!user) {
           />
         ) : activePage === "project" ? (
           <ProjectPage
+            userEmail={user.email || ""}
             onCreatePlannerTodo={createPlannerTodoFromProject}
             onTrashItem={addTrashItem}
           />
@@ -909,15 +942,21 @@ if (!user) {
 
               <div style={{ display: "flex", gap: "8px" }}>
                 <button onClick={() => setIsTodoListOpen(true)} style={todayButtonStyle}>
-                  To do
+                  할일 모음
+                </button>
+                <button onClick={() => openScheduleModal(new Date().toDateString())} style={todayButtonStyle}>
+                  + 일정 추가
                 </button>
                 <button
                   onClick={() => openTodoModal("memo")}
-                  style={plannerQuickAddButtonStyle}
+                  style={todayButtonStyle}
                   title="할 일 바로 추가"
                   aria-label="할 일 바로 추가"
                 >
-                  +
+                  + 할 일 추가
+                </button>
+                <button onClick={() => setIsPlannerSettingsOpen(true)} style={weekButtonStyle} title="알림 설정">
+                  ⚙
                 </button>
 
                 <button onClick={goPrevWeek} style={weekButtonStyle}>
@@ -1343,6 +1382,17 @@ if (!user) {
           </div>
         </div>
       )}
+      {isPlannerSettingsOpen && (
+        <NotificationSettingsModal
+          color={plannerNotificationColor}
+          sound={plannerNotificationSound}
+          vibration={plannerNotificationVibration}
+          onColorChange={setPlannerNotificationColor}
+          onSoundChange={setPlannerNotificationSound}
+          onVibrationChange={setPlannerNotificationVibration}
+          onClose={() => setIsPlannerSettingsOpen(false)}
+        />
+      )}
       <nav style={{
         display: "flex",
         position: "fixed" as const,
@@ -1390,10 +1440,53 @@ if (!user) {
     </main>
   );
 }
+
+function NotificationSettingsModal({
+  color,
+  sound,
+  vibration,
+  onColorChange,
+  onSoundChange,
+  onVibrationChange,
+  onClose,
+}: {
+  color: string;
+  sound: string;
+  vibration: boolean;
+  onColorChange: (value: string) => void;
+  onSoundChange: (value: string) => void;
+  onVibrationChange: (value: boolean) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div style={modalBackdropStyle}>
+      <div style={{ ...modalBoxStyle, width: "420px", padding: "24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h2 style={{ margin: 0, fontSize: "24px", fontWeight: "800" }}>알림 설정</h2>
+          <button onClick={onClose} style={closeButtonStyle}>×</button>
+        </div>
+        <FormLabel title="소리" />
+        <select value={sound} onChange={(e) => onSoundChange(e.target.value)} style={selectStyle}>
+          <option value="soft">부드러운 소리</option>
+          <option value="none">소리 없음</option>
+        </select>
+        <FormLabel title="진동" />
+        <label style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px" }}>
+          <input type="checkbox" checked={vibration} onChange={(e) => onVibrationChange(e.target.checked)} />
+          알림 시 진동 사용
+        </label>
+        <FormLabel title="알림창 색" />
+        <input type="color" value={color} onChange={(e) => onColorChange(e.target.value)} style={{ ...inputStyle, height: "44px" }} />
+      </div>
+    </div>
+  );
+}
 function ProjectPage({
+  userEmail,
   onCreatePlannerTodo,
   onTrashItem,
 }: {
+  userEmail: string;
   onCreatePlannerTodo: (project: {
     title: string;
     area: Area;
@@ -1405,6 +1498,7 @@ function ProjectPage({
   }) => void;
   onTrashItem: (item: Omit<TrashItem, "id" | "deletedAt">) => void;
 }) {
+  const currentOwner = userEmail || "owner@example.com";
   const makeProjectTodos = (items: ProjectTodoSeed[]): ProjectTodo[] =>
     items.map((item, index) => {
       const title = typeof item === "string" ? item : item.title;
@@ -1431,6 +1525,8 @@ function ProjectPage({
       progress: 65,
       status: "진행중",
       memo: "플래너, 캘린더, 프로젝트 센터를 하나의 흐름으로 연결하기",
+      ownerEmail: currentOwner,
+      participants: [],
       todos: makeProjectTodos([
         { title: "캘린더 UI 정리", children: ["구글 캘린더 연결 확인", "일정 추가 팝업 점검"] },
         "프로젝트 센터 구조 만들기",
@@ -1449,6 +1545,8 @@ function ProjectPage({
       progress: 35,
       status: "기획중",
       memo: "런칭 전 소개 콘텐츠와 메시지 정리",
+      ownerEmail: currentOwner,
+      participants: [],
       todos: makeProjectTodos(["브랜드 문장 정리", "인스타 콘텐츠 초안", "소개 페이지 구성"]),
     },
     {
@@ -1463,6 +1561,8 @@ function ProjectPage({
       progress: 45,
       status: "진행중",
       memo: "개인 준비 일정과 체크리스트 관리",
+      ownerEmail: currentOwner,
+      participants: [],
       todos: makeProjectTodos(["업체 비교", "예산표 정리", "촬영 준비물 체크"]),
     },
   ]);
@@ -1480,6 +1580,8 @@ function ProjectPage({
   const [projectStatus, setProjectStatus] = useState("기획중");
   const [projectProgress, setProjectProgress] = useState(0);
   const [projectMemo, setProjectMemo] = useState("");
+  const [projectInviteEmail, setProjectInviteEmail] = useState("");
+  const [projectDraftParticipants, setProjectDraftParticipants] = useState<ProjectParticipant[]>([]);
   const [projectDraftTodos, setProjectDraftTodos] = useState<ProjectTodo[]>([]);
   const [newTodoTitles, setNewTodoTitles] = useState<Record<number, string>>({});
   const [newChildTodoTitles, setNewChildTodoTitles] = useState<Record<string, string>>({});
@@ -1487,6 +1589,7 @@ function ProjectPage({
   const [newDraftChildTitles, setNewDraftChildTitles] = useState<Record<number, string>>({});
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [rootTodoInputOpen, setRootTodoInputOpen] = useState<Record<number, boolean>>({});
+  const [participantSettingsProjectId, setParticipantSettingsProjectId] = useState<number | null>(null);
   const [projectSubAreaOptions, setProjectSubAreaOptions] = useState<Record<Area, string[]>>({
     일: ["본업", "사이드"],
     관리: ["공부", "뷰티", "건강", "경제"],
@@ -1535,6 +1638,27 @@ function ProjectPage({
   const updateProject = (projectId: number, updater: (project: Project) => Project) => {
     setProjects(projects.map((project) => (project.id === projectId ? updater(project) : project)));
   };
+  const addDraftParticipant = () => {
+    const email = projectInviteEmail.trim();
+    if (!email || !email.includes("@") || projectDraftParticipants.some((item) => item.email === email)) return;
+    setProjectDraftParticipants([
+      ...projectDraftParticipants,
+      { email, status: "pending", canEdit: true, canDelete: false },
+    ]);
+    setProjectInviteEmail("");
+  };
+  const updateProjectParticipant = (
+    projectId: number,
+    email: string,
+    updater: (participant: ProjectParticipant) => ProjectParticipant
+  ) => {
+    updateProject(projectId, (project) => ({
+      ...project,
+      participants: project.participants.map((participant) =>
+        participant.email === email ? updater(participant) : participant
+      ),
+    }));
+  };
 
   const sortedProjects = [...projects].sort((a, b) => {
     const titleCompare = a.title.localeCompare(b.title, "ko-KR");
@@ -1547,6 +1671,9 @@ function ProjectPage({
   });
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
+  const pendingInvitation = projects.find((project) =>
+    project.participants.some((participant) => participant.email === userEmail && participant.status === "pending")
+  );
 
   const addProjectSubArea = () => {
     const clean = projectNewSubArea.trim();
@@ -1579,6 +1706,8 @@ function ProjectPage({
       status: projectStatus,
       memo: projectMemo.trim(),
       todos: projectDraftTodos,
+      ownerEmail: currentOwner,
+      participants: projectDraftParticipants,
     };
 
     setProjects(
@@ -1611,6 +1740,8 @@ function ProjectPage({
     setProjectStatus("기획중");
     setProjectProgress(0);
     setProjectMemo("");
+    setProjectInviteEmail("");
+    setProjectDraftParticipants([]);
     setProjectDraftTodos([]);
     setNewDraftTodoTitle("");
     setNewDraftChildTitles({});
@@ -1634,11 +1765,23 @@ function ProjectPage({
   const addProjectTodo = (projectId: number) => {
     const title = (newTodoTitles[projectId] || "").trim();
     if (!title) return;
+    const sourceProject = projects.find((project) => project.id === projectId);
 
     updateProject(projectId, (project) => ({
       ...project,
       todos: [...project.todos, { id: createProjectTodoId(), title, done: false, children: [] }],
     }));
+    if (sourceProject?.dueDate) {
+      onCreatePlannerTodo({
+        title,
+        area: sourceProject.area,
+        subArea: sourceProject.subArea,
+        dueDate: sourceProject.dueDate,
+        urgency: sourceProject.urgency,
+        importance: sourceProject.importance,
+        progress: 0,
+      });
+    }
     setNewTodoTitles({ ...newTodoTitles, [projectId]: "" });
     setRootTodoInputOpen({ ...rootTodoInputOpen, [projectId]: false });
   };
@@ -1739,6 +1882,42 @@ function ProjectPage({
 
     return (
       <div style={projectDetailPageStyle}>
+        {pendingInvitation && (
+          <ProjectInvitePopup
+            project={pendingInvitation}
+            onClose={() =>
+              updateProjectParticipant(pendingInvitation.id, userEmail, (participant) => ({
+                ...participant,
+                status: "declined",
+              }))
+            }
+            onAccept={() =>
+              updateProjectParticipant(pendingInvitation.id, userEmail, (participant) => ({
+                ...participant,
+                status: "accepted",
+              }))
+            }
+            onDecline={() =>
+              updateProjectParticipant(pendingInvitation.id, userEmail, (participant) => ({
+                ...participant,
+                status: "declined",
+              }))
+            }
+          />
+        )}
+        {participantSettingsProjectId && (
+          <ProjectParticipantSettingsModal
+            project={projects.find((project) => project.id === participantSettingsProjectId)}
+            onClose={() => setParticipantSettingsProjectId(null)}
+            onUpdate={(email, updater) => updateProjectParticipant(participantSettingsProjectId, email, updater)}
+            onRemove={(email) =>
+              updateProject(participantSettingsProjectId, (project) => ({
+                ...project,
+                participants: project.participants.filter((participant) => participant.email !== email),
+              }))
+            }
+          />
+        )}
         <div style={pageHeaderStyle}>
           <div>
             <button
@@ -1852,7 +2031,16 @@ function ProjectPage({
               style={projectDetailSelectStyle}
             />
           </div>
-          <div style={{ ...projectSummaryItemStyle, gridColumn: "span 3" }}>
+          <div style={projectSummaryItemStyle}>
+            <span style={projectSummaryLabelStyle}>참석자</span>
+            <div style={projectParticipantSummaryStyle}>
+              <span>👥 {selectedProject.participants.filter((item) => item.status === "accepted").length}</span>
+              <button onClick={() => setParticipantSettingsProjectId(selectedProject.id)} style={miniAddButtonStyle}>
+                설정
+              </button>
+            </div>
+          </div>
+          <div style={{ ...projectSummaryItemStyle, gridColumn: "span 2" }}>
             <span style={projectSummaryLabelStyle}>진행률</span>
             <ProgressBarInput
               value={selectedProject.progress}
@@ -1952,6 +2140,29 @@ function ProjectPage({
 
   return (
     <div>
+      {pendingInvitation && (
+        <ProjectInvitePopup
+          project={pendingInvitation}
+          onClose={() =>
+            updateProjectParticipant(pendingInvitation.id, userEmail, (participant) => ({
+              ...participant,
+              status: "declined",
+            }))
+          }
+          onAccept={() =>
+            updateProjectParticipant(pendingInvitation.id, userEmail, (participant) => ({
+              ...participant,
+              status: "accepted",
+            }))
+          }
+          onDecline={() =>
+            updateProjectParticipant(pendingInvitation.id, userEmail, (participant) => ({
+              ...participant,
+              status: "declined",
+            }))
+          }
+        />
+      )}
       <div style={pageHeaderStyle}>
         <div>
           <h2 style={{ fontSize: "clamp(20px, 5vw, 36px)", fontWeight: "bold", marginBottom: "8px", whiteSpace: "nowrap" }}>
@@ -1999,6 +2210,7 @@ function ProjectPage({
                         {project.area} / {project.subArea}
                       </span>
                       <span style={projectStatusBadgeStyle}>{project.status}</span>
+                      <span style={projectParticipantBadgeStyle}>👥 {project.participants.length}</span>
                     </div>
 
                     <p style={{ color: "#8A8178", fontSize: "14px", margin: "8px 0 14px" }}>
@@ -2246,6 +2458,37 @@ function ProjectPage({
               </div>
             </div>
 
+            <FormLabel title="참석자 추가" />
+            <div style={projectInviteBoxStyle}>
+              <input
+                value={projectInviteEmail}
+                onChange={(e) => setProjectInviteEmail(e.target.value)}
+                onKeyDown={(e) => {
+                  if (shouldSubmitByEnter(e)) addDraftParticipant();
+                }}
+                style={projectTodoInputStyle}
+                placeholder="초대할 구글 계정 이메일"
+              />
+              <button onClick={addDraftParticipant} style={subButtonSmall}>
+                초대
+              </button>
+            </div>
+            <div style={projectParticipantListStyle}>
+              {projectDraftParticipants.map((participant) => (
+                <span key={participant.email} style={projectParticipantChipStyle}>
+                  {participant.email}
+                  <button
+                    onClick={() =>
+                      setProjectDraftParticipants(projectDraftParticipants.filter((item) => item.email !== participant.email))
+                    }
+                    style={googleAttendeeRemoveStyle}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+
             <button style={redButtonFull} onClick={saveProject}>
               {editingProjectId ? "수정하기" : "추가하기"}
             </button>
@@ -2370,6 +2613,96 @@ function ProjectTodoItem({
           </div>
         )}
       </div>}
+    </div>
+  );
+}
+
+function ProjectInvitePopup({
+  project,
+  onClose,
+  onAccept,
+  onDecline,
+}: {
+  project: Project;
+  onClose: () => void;
+  onAccept: () => void;
+  onDecline: () => void;
+}) {
+  return (
+    <div style={modalBackdropStyle}>
+      <div style={{ ...modalBoxStyle, width: "420px", padding: "24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: "22px", fontWeight: "800" }}>
+              {project.title} 프로젝트에 초대되었습니다.
+            </h2>
+            <p style={{ color: "#6B7280", margin: "12px 0 0" }}>초대자 : {project.ownerEmail}</p>
+          </div>
+          <button onClick={onClose} style={closeButtonStyle}>×</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginTop: "24px" }}>
+          <button onClick={onAccept} style={redButtonFull}>수락</button>
+          <button onClick={onDecline} style={deleteFullButtonStyle}>거절</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProjectParticipantSettingsModal({
+  project,
+  onClose,
+  onUpdate,
+  onRemove,
+}: {
+  project?: Project;
+  onClose: () => void;
+  onUpdate: (email: string, updater: (participant: ProjectParticipant) => ProjectParticipant) => void;
+  onRemove: (email: string) => void;
+}) {
+  if (!project) return null;
+
+  return (
+    <div style={modalBackdropStyle}>
+      <div style={{ ...modalBoxStyle, width: "520px", padding: "24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h2 style={{ margin: 0, fontSize: "24px", fontWeight: "800" }}>참석자 설정</h2>
+          <button onClick={onClose} style={closeButtonStyle}>×</button>
+        </div>
+        <div style={{ marginTop: "18px", display: "flex", flexDirection: "column", gap: "10px" }}>
+          <div style={projectOwnerRowStyle}>
+            <div>
+              <strong>{project.ownerEmail}</strong>
+              <div style={{ color: "#8A8178", fontSize: "12px" }}>소유주</div>
+            </div>
+          </div>
+          {project.participants.map((participant) => (
+            <div key={participant.email} style={projectParticipantSettingRowStyle}>
+              <div style={{ minWidth: 0 }}>
+                <strong>{participant.email}</strong>
+                <div style={{ color: "#8A8178", fontSize: "12px" }}>{participant.status}</div>
+              </div>
+              <label style={projectPermissionLabelStyle}>
+                <input
+                  type="checkbox"
+                  checked={participant.canEdit}
+                  onChange={(e) => onUpdate(participant.email, (item) => ({ ...item, canEdit: e.target.checked }))}
+                />
+                수정
+              </label>
+              <label style={projectPermissionLabelStyle}>
+                <input
+                  type="checkbox"
+                  checked={participant.canDelete}
+                  onChange={(e) => onUpdate(participant.email, (item) => ({ ...item, canDelete: e.target.checked }))}
+                />
+                삭제
+              </label>
+              <button onClick={() => onRemove(participant.email)} style={smallDangerButtonStyle}>삭제</button>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -3195,6 +3528,11 @@ function CalendarPage({
   const [calendarError, setCalendarError] = useState("");
   const [isCalendarLoading, setIsCalendarLoading] = useState(false);
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
+  const [isCalendarSettingsOpen, setIsCalendarSettingsOpen] = useState(false);
+  const [notificationSound, setNotificationSound] = useState("soft");
+  const [notificationVibration, setNotificationVibration] = useState(true);
+  const [notificationColor, setNotificationColor] = useState("#1A73E8");
+  const [calendarToast, setCalendarToast] = useState("");
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [eventTitle, setEventTitle] = useState("");
   const [draggedEventId, setDraggedEventId] = useState<string | null>(null);
@@ -3213,6 +3551,7 @@ function CalendarPage({
   const [eventNotificationMethod, setEventNotificationMethod] = useState("알림");
   const [eventNotificationAmount, setEventNotificationAmount] = useState("30");
   const [eventNotificationUnit, setEventNotificationUnit] = useState("분");
+  const [eventReminderRows, setEventReminderRows] = useState<{ method: string; amount: string; unit: string }[]>([]);
   const [eventCalendarName, setEventCalendarName] = useState("1. 개인");
   const [eventColor, setEventColor] = useState("#33B679");
   const [eventBusy, setEventBusy] = useState("바쁨");
@@ -3501,6 +3840,36 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
     if (eventNotificationUnit === "주") return amount * 7 * 24 * 60;
     return amount;
   };
+  const getReminderMinutesFrom = (amountValue: string, unitValue: string) => {
+    const amount = Math.max(0, Number(amountValue) || 0);
+    if (unitValue === "시간") return amount * 60;
+    if (unitValue === "일") return amount * 24 * 60;
+    if (unitValue === "주") return amount * 7 * 24 * 60;
+    return amount;
+  };
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      const soonEvent = events.find((event) => {
+        if (!event.start?.dateTime) return false;
+        const diff = new Date(event.start.dateTime).getTime() - now;
+        return diff > 0 && diff < getReminderMinutes() * 60 * 1000;
+      });
+      if (!soonEvent) return;
+
+      setCalendarToast(`${soonEvent.summary || "일정"} 일정이 곧 시작돼요.`);
+      if (notificationVibration && navigator.vibrate) navigator.vibrate(120);
+      if (notificationSound !== "none") {
+        const audio = new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=");
+        void audio.play().catch(() => undefined);
+      }
+      window.setTimeout(() => setCalendarToast(""), 5000);
+    }, 60000);
+
+    return () => window.clearInterval(timer);
+  }, [events, eventNotificationAmount, eventNotificationUnit, notificationSound, notificationVibration]);
+
   const colorIdByHex: Record<string, string> = {
     "#1A73E8": "9",
     "#33B679": "2",
@@ -3555,6 +3924,7 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
     setEventNotificationMethod("알림");
     setEventNotificationAmount("30");
     setEventNotificationUnit("분");
+    setEventReminderRows([]);
     setEventCalendarName(calendarSources[0]?.id || "primary");
     setEventColor(calendarSources[0]?.backgroundColor || "#33B679");
     setEventBusy("바쁨");
@@ -3589,6 +3959,11 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
     setEventNotificationMethod(event.reminders?.overrides?.[0]?.method === "email" ? "이메일" : "알림");
     setEventNotificationAmount(String(event.reminders?.overrides?.[0]?.minutes || 30));
     setEventNotificationUnit("분");
+    setEventReminderRows((event.reminders?.overrides || []).slice(1).map((reminder) => ({
+      method: reminder.method === "email" ? "이메일" : "알림",
+      amount: String(reminder.minutes),
+      unit: "분",
+    })));
     setEventCalendarName(event.calendarId || "primary");
     setEventColor(event.calendarColor || "#33B679");
     setEventBusy(event.transparency === "transparent" ? "한가함" : "바쁨");
@@ -3638,6 +4013,17 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
       return;
     }
 
+    const reminderOverrides = [
+      {
+        method: eventNotificationMethod === "이메일" ? "email" : "popup",
+        minutes: getReminderMinutes(),
+      },
+      ...eventReminderRows.map((row) => ({
+        method: row.method === "이메일" ? "email" : "popup",
+        minutes: getReminderMinutesFrom(row.amount, row.unit),
+      })),
+    ];
+
     const localEvent = {
       id: editingEventId || `planner-${Date.now()}`,
       summary: eventTitle.trim(),
@@ -3650,12 +4036,7 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
       recurrence: getRepeatRule(),
       reminders: {
         useDefault: false,
-        overrides: [
-          {
-            method: eventNotificationMethod === "이메일" ? "email" : "popup",
-            minutes: getReminderMinutes(),
-          },
-        ],
+        overrides: reminderOverrides,
       },
       transparency: eventBusy === "바쁨" ? "opaque" : "transparent",
       visibility: eventVisibility === "기본 공개 설정" ? "default" : "private",
@@ -3698,12 +4079,7 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
       guestsCanSeeOtherGuests,
       reminders: {
         useDefault: false,
-        overrides: [
-          {
-            method: eventNotificationMethod === "이메일" ? "email" : "popup",
-            minutes: getReminderMinutes(),
-          },
-        ],
+        overrides: reminderOverrides,
       },
       recurrence: getRepeatRule(),
       start: eventAllDay
@@ -3727,13 +4103,15 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
           conferenceSolutionKey: { type: "hangoutsMeet" },
         },
       };
+    } else if (editingEventId) {
+      body.conferenceData = null;
     }
 
     const currentEvent = editingEventId ? events.find((event) => event.id === editingEventId) : null;
     const targetCalendarId = currentEvent?.calendarId || eventCalendarName || "primary";
     const query = new URLSearchParams({
       sendUpdates: "all",
-      ...(eventHasMeet ? { conferenceDataVersion: "1" } : {}),
+      ...((eventHasMeet || editingEventId) ? { conferenceDataVersion: "1" } : {}),
     });
     const url = editingEventId
       ? `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(targetCalendarId)}/events/${editingEventId}?${query.toString()}`
@@ -3892,6 +4270,19 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
 
           <button onClick={() => openCreateEventModal()} style={todayButtonStyle}>
             + 일정 추가
+          </button>
+          <button
+            onClick={() => {
+              openCreateEventModal();
+              setEventEntryType("todo");
+            }}
+            style={todayButtonStyle}
+          >
+            + 할 일 추가
+          </button>
+
+          <button onClick={() => setIsCalendarSettingsOpen(true)} style={weekButtonStyle} title="알림 설정">
+            ⚙
           </button>
 
           <button onClick={goPrevWeek} style={weekButtonStyle}>
@@ -4165,6 +4556,24 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
         </div>
       </div>
 
+      {calendarToast && (
+        <div style={{ ...calendarToastStyle, background: notificationColor }}>
+          {calendarToast}
+        </div>
+      )}
+
+      {isCalendarSettingsOpen && (
+        <NotificationSettingsModal
+          color={notificationColor}
+          sound={notificationSound}
+          vibration={notificationVibration}
+          onColorChange={setNotificationColor}
+          onSoundChange={setNotificationSound}
+          onVibrationChange={setNotificationVibration}
+          onClose={() => setIsCalendarSettingsOpen(false)}
+        />
+      )}
+
       {isEventModalOpen && (
         <div
           style={{ ...modalBackdropStyle, alignItems: "flex-start", overflowY: "auto", padding: "28px 18px" }}
@@ -4359,15 +4768,24 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
                     >
                       {eventHasMeet ? "Google Meet 화상 회의 생성됨" : "Google Meet 화상 회의 추가"}
                     </button>
-                    {getMeetLink(editingEventId ? events.find((event) => event.id === editingEventId) : null) && (
-                      <a
-                        href={getMeetLink(editingEventId ? events.find((event) => event.id === editingEventId) : null)}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={googleMeetLinkStyle}
-                      >
-                        Meet 링크 열기
-                      </a>
+                    {eventHasMeet && (
+                      <div style={googleMeetLinkRowStyle}>
+                        {getMeetLink(editingEventId ? events.find((event) => event.id === editingEventId) : null) ? (
+                          <a
+                            href={getMeetLink(editingEventId ? events.find((event) => event.id === editingEventId) : null)}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={googleMeetLinkStyle}
+                          >
+                            Meet 링크 열기
+                          </a>
+                        ) : (
+                          <span style={googleMeetLinkStyle}>저장하면 Meet 링크가 생성돼요</span>
+                        )}
+                        <button onClick={() => setEventHasMeet(false)} style={googleRemoveMeetButtonStyle}>
+                          링크 삭제
+                        </button>
+                      </div>
                     )}
                     <input
                       value={eventLocation}
@@ -4400,9 +4818,79 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
                         <option>일</option>
                         <option>주</option>
                       </select>
-                      <button style={googleRemoveButtonStyle}>×</button>
+                      <button
+                        onClick={() => {
+                          setEventNotificationMethod("알림");
+                          setEventNotificationAmount("0");
+                          setEventNotificationUnit("분");
+                        }}
+                        style={googleRemoveButtonStyle}
+                      >
+                        ×
+                      </button>
                     </div>
-                    <button style={googleTextButtonStyle}>알림 추가</button>
+                    {eventReminderRows.map((reminder, index) => (
+                      <div key={`${reminder.method}-${index}`} style={googleReminderRowStyle}>
+                        <select
+                          value={reminder.method}
+                          onChange={(e) =>
+                            setEventReminderRows((rows) =>
+                              rows.map((row, rowIndex) =>
+                                rowIndex === index ? { ...row, method: e.target.value } : row
+                              )
+                            )
+                          }
+                          style={googleSmallSelectStyle}
+                        >
+                          <option>알림</option>
+                          <option>이메일</option>
+                        </select>
+                        <input
+                          value={reminder.amount}
+                          onChange={(e) =>
+                            setEventReminderRows((rows) =>
+                              rows.map((row, rowIndex) =>
+                                rowIndex === index ? { ...row, amount: e.target.value } : row
+                              )
+                            )
+                          }
+                          style={googleNumberInputStyle}
+                        />
+                        <select
+                          value={reminder.unit}
+                          onChange={(e) =>
+                            setEventReminderRows((rows) =>
+                              rows.map((row, rowIndex) =>
+                                rowIndex === index ? { ...row, unit: e.target.value } : row
+                              )
+                            )
+                          }
+                          style={googleSmallSelectStyle}
+                        >
+                          <option>분</option>
+                          <option>시간</option>
+                          <option>일</option>
+                          <option>주</option>
+                        </select>
+                        <button
+                          onClick={() => setEventReminderRows((rows) => rows.filter((_, rowIndex) => rowIndex !== index))}
+                          style={googleRemoveButtonStyle}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      onClick={() =>
+                        setEventReminderRows((rows) => [
+                          ...rows,
+                          { method: "알림", amount: "10", unit: "분" },
+                        ])
+                      }
+                      style={googleTextButtonStyle}
+                    >
+                      알림 추가
+                    </button>
 
                     <div style={googleReminderRowStyle}>
                       <select
@@ -4835,6 +5323,16 @@ const googleMeetButtonActiveStyle = {
   fontWeight: "800",
 };
 
+const googleMeetLinkRowStyle = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "12px",
+  padding: "10px 12px",
+  borderRadius: "10px",
+  background: "#E8F0FE",
+};
+
 const googleMeetLinkStyle = {
   display: "inline-flex",
   width: "fit-content",
@@ -4843,6 +5341,15 @@ const googleMeetLinkStyle = {
   fontWeight: "800",
   textDecoration: "none",
   padding: "0 0 4px",
+};
+
+const googleRemoveMeetButtonStyle = {
+  border: "none",
+  background: "transparent",
+  color: "#5F6368",
+  fontSize: "13px",
+  fontWeight: "800",
+  cursor: "pointer",
 };
 
 const googleWideFieldStyle = {
@@ -5140,7 +5647,7 @@ function MemoCell({
 
       <div style={memoTodoSectionStyle}>
         <div style={memoHeaderStyle}>
-          <div style={memoTitleStyle}>이번 주 To do</div>
+          <div style={memoTitleStyle}>이번 주 할 일 살포시 정리</div>
           <button onClick={() => openTodoModal("memo")} style={miniAddButtonStyle}>
             + 할일 추가
           </button>
@@ -5593,11 +6100,11 @@ const calendarEventTimeStyle = {
 
 const calendarEventResizeHandleBaseStyle = {
   position: "absolute" as const,
-  left: "10px",
-  right: "10px",
-  height: "6px",
+  left: "0",
+  right: "0",
+  height: "8px",
   borderRadius: "999px",
-  background: "rgba(255,255,255,0.55)",
+  background: "transparent",
   cursor: "ns-resize",
 };
 
@@ -5609,6 +6116,21 @@ const calendarEventResizeTopStyle = {
 const calendarEventResizeBottomStyle = {
   ...calendarEventResizeHandleBaseStyle,
   bottom: "3px",
+};
+
+const calendarToastStyle = {
+  position: "fixed" as const,
+  left: "184px",
+  bottom: "24px",
+  zIndex: 1200,
+  minWidth: "260px",
+  maxWidth: "360px",
+  color: "#FFFFFF",
+  borderRadius: "14px",
+  padding: "14px 16px",
+  fontSize: "14px",
+  fontWeight: "800",
+  boxShadow: "0 18px 42px rgba(15,23,42,0.2)",
 };
 
 const twoColumnStyle = {
@@ -5906,6 +6428,77 @@ const projectStatusBadgeStyle = {
   color: "#B40023",
   fontSize: "13px",
   fontWeight: "bold",
+};
+
+const projectParticipantBadgeStyle = {
+  padding: "6px 10px",
+  borderRadius: "999px",
+  background: "#EEF5FF",
+  color: "#1B64DA",
+  fontSize: "13px",
+  fontWeight: "800",
+};
+
+const projectParticipantSummaryStyle = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "8px",
+};
+
+const projectInviteBoxStyle = {
+  display: "grid",
+  gridTemplateColumns: "1fr 72px",
+  gap: "8px",
+  background: "#FFFFFF",
+  border: "1px solid #DDE5EE",
+  borderRadius: "12px",
+  padding: "6px",
+};
+
+const projectParticipantListStyle = {
+  display: "flex",
+  flexWrap: "wrap" as const,
+  gap: "8px",
+  margin: "8px 0 16px",
+};
+
+const projectParticipantChipStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "6px",
+  borderRadius: "999px",
+  background: "#EEF5FF",
+  color: "#1B64DA",
+  fontSize: "12px",
+  fontWeight: "800",
+  padding: "6px 9px",
+};
+
+const projectParticipantSettingRowStyle = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto auto auto",
+  gap: "10px",
+  alignItems: "center",
+  border: "1px solid #E5EAF2",
+  borderRadius: "12px",
+  padding: "10px",
+};
+
+const projectOwnerRowStyle = {
+  border: "1px solid #F0D5DB",
+  borderRadius: "12px",
+  padding: "10px",
+  background: "#FFF7F7",
+};
+
+const projectPermissionLabelStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "4px",
+  color: "#4E5968",
+  fontSize: "12px",
+  fontWeight: "800",
 };
 
 const projectAreaBadgeStyle = {
