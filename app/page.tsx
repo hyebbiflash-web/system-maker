@@ -4993,7 +4993,7 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
                               right: "auto",
                               zIndex: position.zIndex,
                               background: event.calendarColor || calendarEventButtonStyle.background,
-                              borderColor: event.calendarColor || "#AECBFA",
+                              border: `1px solid ${event.calendarColor || "#AECBFA"}`,
                               color: "#FFFFFF",
                               opacity: draggedEventId === event.id ? 0.5 : 1,
                               cursor: "grab",
@@ -7276,7 +7276,7 @@ const projectTodoDragHandleStyle = {
 const projectTodoDragHandleActiveStyle = {
   cursor: "grabbing",
   background: "#FFF1F3",
-  borderColor: "#F3B4C0",
+  border: "1px solid #F3B4C0",
   color: "#B40023",
   transform: "scale(1.04)",
   boxShadow: "0 4px 10px rgba(180,0,35,0.12)",
