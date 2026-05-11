@@ -4,7 +4,7 @@ import LoginPage from "./login";
 import { getRedirectResult } from "firebase/auth";
 import { useEffect, useState, type Dispatch, type KeyboardEvent, type SetStateAction } from "react";
 import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
-import { Settings } from "lucide-react";
+import { CalendarDays, ClipboardList, FolderKanban, NotebookPen, Settings, Trash2 } from "lucide-react";
 import { auth, calendarProvider } from "./firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, setDoc, onSnapshot } from "firebase/firestore";
@@ -1454,49 +1454,33 @@ if (!user) {
           onClose={() => setIsPlannerSettingsOpen(false)}
         />
       )}
-      <nav style={{
-        display: "flex",
-        position: "fixed" as const,
-        bottom: 0,
-        left: 0,
-        right: 0,
-        height: "64px",
-        background: "#FFFCF8",
-        borderTop: "1px solid #E8E1D8",
-        justifyContent: "space-around",
-        alignItems: "center",
-        zIndex: 50,
-      }}
+      <nav style={mobileTabDockStyle}
         className="flex md:hidden"
       >
         {[
-          { id: "calendar", label: "캘린더", icon: "📅" },
-          { id: "planner", label: "플래너", icon: "📋" },
-          { id: "project", label: "프로젝트", icon: "🗂️" },
-          { id: "record", label: "기록", icon: "📝" },
-          { id: "trash", label: "휴지통", icon: "🗑️" },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActivePage(tab.id as typeof activePage)}
-            style={{
-              display: "flex",
-              flexDirection: "column" as const,
-              alignItems: "center",
-              gap: "2px",
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              padding: "8px 16px",
-              color: activePage === tab.id ? "#B40023" : "#8A8178",
-              fontWeight: activePage === tab.id ? "800" : "400",
-              fontSize: "11px",
-            }}
-          >
-            <span style={{ fontSize: "22px" }}>{tab.icon}</span>
-            {tab.label}
-          </button>
-        ))}
+          { id: "calendar", label: "캘린더", Icon: CalendarDays },
+          { id: "planner", label: "플래너", Icon: ClipboardList },
+          { id: "project", label: "프로젝트", Icon: FolderKanban },
+          { id: "record", label: "기록", Icon: NotebookPen },
+          { id: "trash", label: "휴지통", Icon: Trash2 },
+        ].map((tab) => {
+          const active = activePage === tab.id;
+          const Icon = tab.Icon;
+
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActivePage(tab.id as typeof activePage)}
+              style={{
+                ...mobileTabButtonStyle,
+                ...(active ? mobileTabButtonActiveStyle : {}),
+              }}
+            >
+              <Icon size={22} strokeWidth={active ? 2.6 : 2.1} />
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
       </nav>
     </main>
   );
@@ -3939,7 +3923,7 @@ function CalendarPage({
 
   const startHour = 0;
   const endHour = 23;
-  const hourHeight = 64;
+  const hourHeight = 54;
 
   const startOfWeek = new Date(calendarDate);
   const day = calendarDate.getDay();
@@ -6453,6 +6437,52 @@ const sidebarStyle = {
   flexDirection: "column" as const,
 };
 
+const mobileTabDockStyle = {
+  display: "flex",
+  position: "fixed" as const,
+  left: "50%",
+  bottom: "12px",
+  transform: "translateX(-50%)",
+  width: "min(620px, calc(100vw - 20px))",
+  height: "76px",
+  padding: "8px",
+  gap: "6px",
+  background: "rgba(255,252,248,0.94)",
+  border: "1px solid rgba(232,225,216,0.92)",
+  borderRadius: "24px",
+  boxShadow: "0 16px 38px rgba(25,31,40,0.16)",
+  backdropFilter: "blur(14px)",
+  justifyContent: "space-between",
+  alignItems: "center",
+  zIndex: 50,
+};
+
+const mobileTabButtonStyle = {
+  flex: 1,
+  height: "60px",
+  border: "1px solid transparent",
+  borderRadius: "18px",
+  background: "transparent",
+  color: "#99A1AD",
+  cursor: "pointer",
+  display: "flex",
+  flexDirection: "column" as const,
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "4px",
+  fontSize: "11px",
+  fontWeight: "800",
+  transition: "background 160ms ease, color 160ms ease, transform 160ms ease, box-shadow 160ms ease",
+};
+
+const mobileTabButtonActiveStyle = {
+  background: "#FFF1F3",
+  border: "1px solid #F3C5CE",
+  color: "#B40023",
+  transform: "translateY(-1px)",
+  boxShadow: "0 8px 18px rgba(180,0,35,0.10)",
+};
+
 const plannerOuterStyle = {
   background: "#FFFCF8",
   borderRadius: "18px",
@@ -6485,7 +6515,7 @@ const calendarTitleRowStyle = {
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
-  padding: "22px 24px",
+  padding: "16px 22px",
   borderBottom: "1px solid #E8EAED",
   background: "#FFFFFF",
 };
@@ -6528,7 +6558,7 @@ const googleCalendarGridStyle = {
 };
 
 const calendarHeaderCellStyle = {
-  minHeight: "88px",
+  minHeight: "72px",
   borderRight: "1px solid #E8EAED",
   borderBottom: "1px solid #E8EAED",
   display: "flex",
@@ -6546,21 +6576,21 @@ const calendarDayNameStyle = {
 };
 
 const calendarDayNumberButtonStyle = {
-  marginTop: "8px",
-  width: "42px",
-  height: "42px",
+  marginTop: "5px",
+  width: "36px",
+  height: "36px",
   borderRadius: "50%",
   border: "none",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  fontSize: "24px",
+  fontSize: "21px",
   fontWeight: "500",
   cursor: "pointer",
 };
 
 const calendarScrollAreaStyle = {
-  maxHeight: "640px",
+  maxHeight: "560px",
   overflow: "auto",
 };
 
