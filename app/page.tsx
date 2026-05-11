@@ -1659,6 +1659,7 @@ function ProjectPage({
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [rootTodoInputOpen, setRootTodoInputOpen] = useState<Record<number, boolean>>({});
   const [draggedProjectTodoId, setDraggedProjectTodoId] = useState<number | null>(null);
+  const [dragOverProjectTodoId, setDragOverProjectTodoId] = useState<number | null>(null);
   const [participantSettingsProjectId, setParticipantSettingsProjectId] = useState<number | null>(null);
   const [projectSubAreaOptions, setProjectSubAreaOptions] = useState<Record<Area, string[]>>({
     일: ["본업", "사이드"],
@@ -2303,11 +2304,23 @@ function ProjectPage({
                   onUpdate={(todoId, updater) => updateProjectTodo(selectedProject.id, todoId, updater)}
                   onDelete={(todoId) => deleteProjectTodo(selectedProject.id, todoId)}
                   draggingTodoId={draggedProjectTodoId}
-                  onDragStartTodo={(todoId) => setDraggedProjectTodoId(todoId)}
-                  onDragEndTodo={() => setDraggedProjectTodoId(null)}
+                  dragOverTodoId={dragOverProjectTodoId}
+                  onDragStartTodo={(todoId) => {
+                    setDraggedProjectTodoId(todoId);
+                    setDragOverProjectTodoId(null);
+                  }}
+                  onDragEndTodo={() => {
+                    setDraggedProjectTodoId(null);
+                    setDragOverProjectTodoId(null);
+                  }}
+                  onDragOverTodo={(todoId) => setDragOverProjectTodoId(todoId)}
+                  onDragLeaveTodo={(todoId) =>
+                    setDragOverProjectTodoId((currentId) => (currentId === todoId ? null : currentId))
+                  }
                   onDropTodo={(targetTodoId) => {
                     if (draggedProjectTodoId) moveProjectTodo(selectedProject.id, draggedProjectTodoId, targetTodoId);
                     setDraggedProjectTodoId(null);
+                    setDragOverProjectTodoId(null);
                   }}
                   onDueDateChange={(todoId, dueDate) => {
                     const targetTodo = findProjectTodo(selectedProject.todos, todoId);
@@ -2646,8 +2659,11 @@ function ProjectPage({
                     setProjectDraftTodos(updateTodoTree(projectDraftTodos, todoId, (todo) => ({ ...todo, dueDate })))
                   }
                   draggingTodoId={null}
+                  dragOverTodoId={null}
                   onDragStartTodo={() => undefined}
                   onDragEndTodo={() => undefined}
+                  onDragOverTodo={() => undefined}
+                  onDragLeaveTodo={() => undefined}
                   onDropTodo={() => undefined}
                   getNewChildTitle={(todoId) => newDraftChildTitles[todoId] || ""}
                   setNewChildTitle={(todoId, value) =>
@@ -2733,8 +2749,11 @@ function ProjectTodoItem({
   onDelete,
   onDueDateChange,
   draggingTodoId,
+  dragOverTodoId,
   onDragStartTodo,
   onDragEndTodo,
+  onDragOverTodo,
+  onDragLeaveTodo,
   onDropTodo,
   getNewChildTitle,
   setNewChildTitle,
@@ -2748,8 +2767,11 @@ function ProjectTodoItem({
   onDelete: (todoId: number) => void;
   onDueDateChange: (todoId: number, dueDate: string) => void;
   draggingTodoId: number | null;
+  dragOverTodoId: number | null;
   onDragStartTodo: (todoId: number) => void;
   onDragEndTodo: () => void;
+  onDragOverTodo: (todoId: number) => void;
+  onDragLeaveTodo: (todoId: number) => void;
   onDropTodo: (todoId: number) => void;
   getNewChildTitle: (todoId: number) => string;
   setNewChildTitle: (todoId: number, value: string) => void;
@@ -2761,6 +2783,8 @@ function ProjectTodoItem({
   const [isCollapsed, setIsCollapsed] = useState(false);
   const childTitle = getNewChildTitle(todo.id);
   const childDueDate = getNewChildDueDate(todo.id);
+  const isDragging = draggingTodoId === todo.id;
+  const isDropTarget = Boolean(draggingTodoId && draggingTodoId !== todo.id && dragOverTodoId === todo.id);
   const submitChildTodo = () => {
     if (!childTitle.trim()) return;
 
@@ -2771,7 +2795,16 @@ function ProjectTodoItem({
   return (
     <div
       onDragOver={(event) => {
-        if (draggingTodoId && draggingTodoId !== todo.id) event.preventDefault();
+        if (draggingTodoId && draggingTodoId !== todo.id) {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+          onDragOverTodo(todo.id);
+        }
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          onDragLeaveTodo(todo.id);
+        }
       }}
       onDrop={(event) => {
         event.preventDefault();
@@ -2780,9 +2813,11 @@ function ProjectTodoItem({
       style={{
         ...projectTodoBoxStyle,
         ...(depth > 0 ? projectSubTodoBoxStyle : {}),
-        ...(draggingTodoId === todo.id ? projectTodoDraggingStyle : {}),
+        ...(isDragging ? projectTodoDraggingStyle : {}),
+        ...(isDropTarget ? projectTodoDropTargetStyle : {}),
       }}
     >
+      {isDropTarget && <div style={projectTodoDropLineStyle} />}
       <div
         style={{
           ...projectTodoRowStyle,
@@ -2799,7 +2834,10 @@ function ProjectTodoItem({
           }}
           onDragEnd={onDragEndTodo}
           onMouseDown={(event) => event.currentTarget.focus()}
-          style={projectTodoDragHandleStyle}
+          style={{
+            ...projectTodoDragHandleStyle,
+            ...(isDragging ? projectTodoDragHandleActiveStyle : {}),
+          }}
           title="꾹 눌러 순서 이동"
         >
           ⋮⋮
@@ -2861,8 +2899,11 @@ function ProjectTodoItem({
             onDelete={onDelete}
             onDueDateChange={onDueDateChange}
             draggingTodoId={draggingTodoId}
+            dragOverTodoId={dragOverTodoId}
             onDragStartTodo={onDragStartTodo}
             onDragEndTodo={onDragEndTodo}
+            onDragOverTodo={onDragOverTodo}
+            onDragLeaveTodo={onDragLeaveTodo}
             onDropTodo={onDropTodo}
             getNewChildTitle={getNewChildTitle}
             setNewChildTitle={setNewChildTitle}
@@ -6863,11 +6904,13 @@ const plannerEmptyTextStyle = {
 };
 
 const projectTodoBoxStyle = {
+  position: "relative" as const,
   background: "transparent",
   border: "none",
   borderBottom: "1px solid #E8E1D8",
   borderRadius: 0,
   padding: "6px 0",
+  transition: "background 160ms ease, transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, opacity 160ms ease",
 };
 
 const projectSubTodoBoxStyle = {
@@ -7227,12 +7270,39 @@ const projectTodoDragHandleStyle = {
   color: "#6B7280",
   letterSpacing: "-3px",
   paddingRight: "3px",
+  transition: "transform 160ms ease, background 160ms ease, color 160ms ease, border-color 160ms ease, box-shadow 160ms ease",
+};
+
+const projectTodoDragHandleActiveStyle = {
+  cursor: "grabbing",
+  background: "#FFF1F3",
+  borderColor: "#F3B4C0",
+  color: "#B40023",
+  transform: "scale(1.04)",
+  boxShadow: "0 4px 10px rgba(180,0,35,0.12)",
 };
 
 const projectTodoDraggingStyle = {
-  opacity: 0.45,
-  borderColor: "#B40023",
+  opacity: 0.62,
   background: "#FFF7F8",
+  transform: "scale(0.995)",
+  boxShadow: "0 8px 18px rgba(180,0,35,0.08)",
+};
+
+const projectTodoDropTargetStyle = {
+  background: "#FFF8F9",
+  transform: "translateY(2px)",
+};
+
+const projectTodoDropLineStyle = {
+  position: "absolute" as const,
+  top: "-2px",
+  left: 0,
+  right: 0,
+  height: "2px",
+  borderRadius: "999px",
+  background: "#B40023",
+  boxShadow: "0 0 0 4px rgba(180,0,35,0.08)",
 };
 
 const subTodoListStyle = {
