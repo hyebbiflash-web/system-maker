@@ -1774,7 +1774,37 @@ function ProjectPage({
       };
     });
 
-  const createDefaultProjects = (): Project[] => [];
+  const createDefaultProjects = (): Project[] => [
+    {
+      id: 2,
+      title: "[예시] 브랜드 콘텐츠 기획",
+      desc: "System Maker를 소개할 콘텐츠와 런칭 스토리 정리",
+      area: "일",
+      subArea: "사이드",
+      dueDate: "",
+      urgency: 1,
+      importance: 2,
+      progress: 35,
+      status: "기획중",
+      memo: "런칭 전 소개 콘텐츠와 메시지 정리",
+      ownerEmail: currentOwner,
+      participants: [],
+      todos: makeProjectTodos(["브랜드 문장 정리", "인스타 콘텐츠 초안", "소개 페이지 구성"]),
+    },
+  ];
+  const normalizeStoredProjects = (storedProjects: Project[]) => {
+    const legacyDefaultTitles = new Set(["System Maker 개발", "웨딩 준비"]);
+
+    return storedProjects
+      .filter((project) => !legacyDefaultTitles.has(project.title))
+      .map((project) => ({
+        ...project,
+        title: project.title === "브랜드 콘텐츠 기획" ? "[예시] 브랜드 콘텐츠 기획" : project.title,
+        ownerEmail: project.ownerEmail || currentOwner,
+        participants: project.participants || [],
+        todos: project.todos || [],
+      }));
+  };
   const [projects, setProjects] = useState<Project[]>(() => {
     if (typeof window === "undefined") return createDefaultProjects();
 
@@ -1785,12 +1815,8 @@ function ProjectPage({
       const parsedProjects = JSON.parse(savedProjects) as Project[];
       if (!Array.isArray(parsedProjects)) return createDefaultProjects();
 
-      return parsedProjects.map((project) => ({
-        ...project,
-        ownerEmail: project.ownerEmail || currentOwner,
-        participants: project.participants || [],
-        todos: project.todos || [],
-      }));
+      const normalizedProjects = normalizeStoredProjects(parsedProjects);
+      return normalizedProjects.length > 0 ? normalizedProjects : createDefaultProjects();
     } catch {
       return createDefaultProjects();
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
   browserLocalPersistence,
   browserSessionPersistence,
@@ -17,14 +17,13 @@ const AUTO_LOGIN_KEY = "system-maker-auto-login";
 export default function LoginPage({ onLogin }: { onLogin: () => void }) {
   const [loginError, setLoginError] = useState("");
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [autoLogin, setAutoLogin] = useState(true);
+  const [autoLogin, setAutoLogin] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const saved = window.localStorage.getItem(AUTO_LOGIN_KEY);
+    return saved === null ? true : saved === "true";
+  });
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
-
-  useEffect(() => {
-    const saved = window.localStorage.getItem(AUTO_LOGIN_KEY);
-    if (saved !== null) setAutoLogin(saved === "true");
-  }, []);
 
   const handleAutoLoginChange = (checked: boolean) => {
     setAutoLogin(checked);
