@@ -1085,6 +1085,7 @@ if (!user) {
             todos={todos}
             onToggleTodo={toggleDone}
             onOpenTodoList={() => setIsTodoListOpen(true)}
+            onLogout={() => signOut(auth)}
           />
         ) : activePage === "project" ? (
           <ProjectPage
@@ -1773,62 +1774,7 @@ function ProjectPage({
       };
     });
 
-  const createDefaultProjects = (): Project[] => [
-    {
-      id: 1,
-      title: "System Maker 개발",
-      desc: "플래너, 캘린더, 프로젝트 센터를 연결하는 나만의 업무 OS",
-      area: "일",
-      subArea: "사이드",
-      dueDate: "",
-      urgency: 2,
-      importance: 3,
-      progress: 65,
-      status: "진행중",
-      memo: "플래너, 캘린더, 프로젝트 센터를 하나의 흐름으로 연결하기",
-      ownerEmail: currentOwner,
-      participants: [
-        { email: "demo.partner@example.com", status: "pending", canEdit: true, canDelete: false },
-      ],
-      todos: makeProjectTodos([
-        { title: "캘린더 UI 정리", children: ["구글 캘린더 연결 확인", "일정 추가 팝업 점검"] },
-        "프로젝트 센터 구조 만들기",
-        "Firebase 저장 연결",
-      ]),
-    },
-    {
-      id: 2,
-      title: "브랜드 콘텐츠 기획",
-      desc: "System Maker를 소개할 콘텐츠와 런칭 스토리 정리",
-      area: "일",
-      subArea: "사이드",
-      dueDate: "",
-      urgency: 1,
-      importance: 2,
-      progress: 35,
-      status: "기획중",
-      memo: "런칭 전 소개 콘텐츠와 메시지 정리",
-      ownerEmail: currentOwner,
-      participants: [],
-      todos: makeProjectTodos(["브랜드 문장 정리", "인스타 콘텐츠 초안", "소개 페이지 구성"]),
-    },
-    {
-      id: 3,
-      title: "웨딩 준비",
-      desc: "개인 일정과 준비할 일을 프로젝트처럼 관리",
-      area: "일상",
-      subArea: "그외",
-      dueDate: "",
-      urgency: 2,
-      importance: 2,
-      progress: 45,
-      status: "진행중",
-      memo: "개인 준비 일정과 체크리스트 관리",
-      ownerEmail: currentOwner,
-      participants: [],
-      todos: makeProjectTodos(["업체 비교", "예산표 정리", "촬영 준비물 체크"]),
-    },
-  ];
+  const createDefaultProjects = (): Project[] => [];
   const [projects, setProjects] = useState<Project[]>(() => {
     if (typeof window === "undefined") return createDefaultProjects();
 
@@ -2319,7 +2265,16 @@ function ProjectPage({
         {participantSettingsProjectId && (
           <ProjectParticipantSettingsModal
             project={projects.find((project) => project.id === participantSettingsProjectId)}
+            currentUserEmail={userEmail}
             onClose={() => setParticipantSettingsProjectId(null)}
+            onInvite={(email) =>
+              updateProject(participantSettingsProjectId, (project) => ({
+                ...project,
+                participants: project.participants.some((p) => p.email === email)
+                  ? project.participants
+                  : [...project.participants, { email, status: "pending", canEdit: true, canDelete: false }],
+              }))
+            }
             onUpdate={(email, updater) => updateProjectParticipant(participantSettingsProjectId, email, updater)}
             onRemove={(email) =>
               updateProject(participantSettingsProjectId, (project) => ({
@@ -2678,6 +2633,11 @@ function ProjectPage({
           }}
         >
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            {sortedProjects.length === 0 && (
+              <div style={{ color: "#8A8178", fontSize: "15px", textAlign: "center", padding: "32px 0" }}>
+                아직 프로젝트가 없어요. + 프로젝트 추가를 눌러 시작해 보세요.
+              </div>
+            )}
             {sortedProjects.map((project) => {
               const todoCount = countTodos(project.todos);
               return (
@@ -3276,16 +3236,32 @@ function ProjectInvitePopup({
 
 function ProjectParticipantSettingsModal({
   project,
+  currentUserEmail,
   onClose,
+  onInvite,
   onUpdate,
   onRemove,
 }: {
   project?: Project;
+  currentUserEmail: string;
   onClose: () => void;
+  onInvite: (email: string) => void;
   onUpdate: (email: string, updater: (participant: ProjectParticipant) => ProjectParticipant) => void;
   onRemove: (email: string) => void;
 }) {
+  const [inviteEmail, setInviteEmail] = useState("");
   if (!project) return null;
+
+  const isOwner = project.ownerEmail === currentUserEmail;
+
+  const handleInvite = () => {
+    const email = inviteEmail.trim();
+    if (!email || !email.includes("@")) return;
+    if (email === project.ownerEmail) return;
+    if (project.participants.some((p) => p.email === email)) return;
+    onInvite(email);
+    setInviteEmail("");
+  };
 
   return (
     <div style={modalBackdropStyle}>
@@ -3294,11 +3270,28 @@ function ProjectParticipantSettingsModal({
           <h2 style={{ margin: 0, fontSize: "24px", fontWeight: "800" }}>참석자 설정</h2>
           <button onClick={onClose} style={closeButtonStyle}>×</button>
         </div>
+
+        {isOwner && (
+          <div style={{ marginTop: "18px", display: "flex", gap: "8px" }}>
+            <input
+              type="email"
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleInvite(); }}
+              placeholder="초대할 구글 계정 이메일"
+              style={{ ...inputStyle, flex: 1, height: "40px" }}
+            />
+            <button onClick={handleInvite} style={{ ...subButtonSmall, height: "40px", whiteSpace: "nowrap" }}>
+              초대
+            </button>
+          </div>
+        )}
+
         <div style={{ marginTop: "18px", display: "flex", flexDirection: "column", gap: "10px" }}>
           <div style={projectOwnerRowStyle}>
             <div>
               <strong>{project.ownerEmail}</strong>
-              <div style={{ color: "#8A8178", fontSize: "12px" }}>소유주 · 참석자 · 수락 완료</div>
+              <div style={{ color: "#8A8178", fontSize: "12px" }}>소유주 · 수락 완료</div>
             </div>
           </div>
           {project.participants.length === 0 && (
@@ -3308,29 +3301,33 @@ function ProjectParticipantSettingsModal({
           )}
           {project.participants.map((participant) => (
             <div key={participant.email} style={projectParticipantSettingRowStyle}>
-              <div style={{ minWidth: 0 }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
                 <strong>{participant.email}</strong>
                 <div style={{ color: "#8A8178", fontSize: "12px" }}>
-                  초대 상태 · {participant.status === "pending" ? "대기중" : participant.status === "accepted" ? "수락 완료" : "거절됨"}
+                  {participant.status === "pending" ? "대기중" : participant.status === "accepted" ? "수락 완료" : "거절됨"}
                 </div>
               </div>
-              <label style={projectPermissionLabelStyle}>
-                <input
-                  type="checkbox"
-                  checked={participant.canEdit}
-                  onChange={(e) => onUpdate(participant.email, (item) => ({ ...item, canEdit: e.target.checked }))}
-                />
-                수정
-              </label>
-              <label style={projectPermissionLabelStyle}>
-                <input
-                  type="checkbox"
-                  checked={participant.canDelete}
-                  onChange={(e) => onUpdate(participant.email, (item) => ({ ...item, canDelete: e.target.checked }))}
-                />
-                삭제
-              </label>
-              <button onClick={() => onRemove(participant.email)} style={smallDangerButtonStyle}>삭제</button>
+              {isOwner && (
+                <>
+                  <label style={projectPermissionLabelStyle}>
+                    <input
+                      type="checkbox"
+                      checked={participant.canEdit}
+                      onChange={(e) => onUpdate(participant.email, (item) => ({ ...item, canEdit: e.target.checked }))}
+                    />
+                    수정
+                  </label>
+                  <label style={projectPermissionLabelStyle}>
+                    <input
+                      type="checkbox"
+                      checked={participant.canDelete}
+                      onChange={(e) => onUpdate(participant.email, (item) => ({ ...item, canDelete: e.target.checked }))}
+                    />
+                    삭제
+                  </label>
+                  <button onClick={() => onRemove(participant.email)} style={smallDangerButtonStyle}>내보내기</button>
+                </>
+              )}
             </div>
           ))}
         </div>
@@ -4179,6 +4176,7 @@ function CalendarPage({
   todos,
   onToggleTodo,
   onOpenTodoList,
+  onLogout,
 }: {
   events: GoogleCalendarEvent[];
   setEvents: Dispatch<SetStateAction<GoogleCalendarEvent[]>>;
@@ -4188,6 +4186,7 @@ function CalendarPage({
   todos: Todo[];
   onToggleTodo: (todoId: number) => void;
   onOpenTodoList: () => void;
+  onLogout: () => void;
 }) {
   const [calendarDate, setCalendarDate] = useState(new Date());
   const [isConnected, setIsConnected] = useState(false);
@@ -4987,6 +4986,10 @@ const patchGoogleEventTime = async (event: GoogleCalendarEvent) => {
 
           <button onClick={goNextWeek} style={weekButtonStyle}>
             {">"}
+          </button>
+
+          <button onClick={onLogout} style={logoutButtonStyle}>
+            로그아웃
           </button>
         </div>
       </div>
@@ -8214,8 +8217,6 @@ const weekButtonStyle = {
 
 const settingsIconButtonStyle = {
   ...weekButtonStyle,
-  width: "54px",
-  height: "54px",
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
@@ -8236,6 +8237,21 @@ const todayButtonStyle = {
   alignItems: "center",
   justifyContent: "center",
   gap: "7px",
+  cursor: "pointer",
+};
+
+const logoutButtonStyle = {
+  height: "44px",
+  padding: "0 18px",
+  borderRadius: "14px",
+  border: "1px solid #E8C4C4",
+  background: "#FFF5F5",
+  color: "#B40023",
+  fontSize: "15px",
+  fontWeight: "bold",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
   cursor: "pointer",
 };
 
